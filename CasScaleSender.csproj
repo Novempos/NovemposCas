@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProjectGuid>{7C4B9A31-8D62-4E5A-9C10-2F6A1B3C4D5E}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>CasScaleSender</RootNamespace>
+    <AssemblyName>NovemposTerazi</AssemblyName>
+    <ApplicationIcon>novempos.ico</ApplicationIcon>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- OCX/DLL'ler 32-bit oldugu icin uygulama MUTLAKA x86 derlenmeli -->
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="AxInterop.CASSCALELib">
+      <HintPath>libs\AxInterop.CASSCALELib.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="Interop.CASSCALELib">
+      <HintPath>libs\Interop.CASSCALELib.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="MainForm.cs" />
+    <Compile Include="ExcelReader.cs" />
+    <Compile Include="PluBuilder.cs" />
+    <Compile Include="PluReader.cs" />
+    <Compile Include="XlsxWriter.cs" />
+    <Compile Include="PluListPrinter.cs" />
+    <Compile Include="AppSettings.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <!-- Pencere ikonu: exe'ye gomulur, MainForm calisma aninda buradan yukler -->
+  <ItemGroup>
+    <EmbeddedResource Include="novempos.ico">
+      <LogicalName>novempos.ico</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  <!-- Terazi kutuphanesi dosyalari exe ile ayni klasore kopyalanir -->
+  <ItemGroup>
+    <Content Include="runtime\CasScale.ocx">
+      <Link>CasScale.ocx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\CASPRTC.dll">
+      <Link>CASPRTC.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\CLInterpreter.dll">
+      <Link>CLInterpreter.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\CASTCPIP.dll">
+      <Link>CASTCPIP.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\CASSERIAL.dll">
+      <Link>CASSERIAL.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\CASFTP.dll">
+      <Link>CASFTP.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\DATAOPTION.INI">
+      <Link>DATAOPTION.INI</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtime\register.bat">
+      <Link>register.bat</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

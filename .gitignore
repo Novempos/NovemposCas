@@ -1,0 +1,24 @@
+# Build ciktilari
+[Bb]in/
+[Oo]bj/
+
+# Uretilen kurulum paketi (build artifact - Release olarak ikili eklenir)
+installer/Output/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.cache
+
+# Kullanici ayarlari (calisma aninda %APPDATA%'da olusur, repoya girmez)
+ayarlar.txt
+
+# Claude Code makineye ozel ayarlar
+.claude/settings.local.json
+.claude/settings.local.json.bak
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

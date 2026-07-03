@@ -1,0 +1,129 @@
+========================================================================
+  NOVEMPOS - TERAZI PLU GONDERICI  (CAS CL3000 / CL5000 - CL-Works'e gerek yok)
+========================================================================
+
+NE YAPAR
+--------
+Bir Excel (.xlsx) dosyasindaki PLU listesini secip, terazinin IP:PORT
+adresine dogrudan gonderir. Resmi CAS OCX bileşenini (CasScale.ocx)
+kullanir; byte protokolü ile ugrasmaz. IP ve Port bir sonraki acilista
+hatirlanir (ayarlar.txt) ama istediginiz zaman degistirebilirsiniz.
+
+
+KURULUM (onerilen - son kullanici)
+-----------------------------------
+1) NovemposTerazi_Kurulum_x.x.x.exe dosyasina cift tiklayin.
+   (Yonetici izni ister - "Evet" deyin. OCX otomatik kaydedilir.)
+2) "Bilesenler" adiminda ne kurulacagini secin (ikisi birden de olabilir):
+     [x] Masaustu uygulamasi (GUI - pencere)
+     [x] Terminal uygulamasi (novempos-cli - komut satiri)
+3) Sihirbazi takip edin; kurulum bitince programi baslatabilirsiniz.
+4) Kaldirmak icin: Ayarlar > Uygulamalar veya Denetim Masasi > Programlar.
+   (Kaldirinca OCX kaydi da geri alinir.)
+
+HIZLI BASLANGIC (kullanim)
+--------------------------
+1) Programi acin (Baslat menusu > Novempos, veya masaustu kisayolu).
+2) GONDER : "Sec..." ile Excel'i secip Terazi IP/Port yazin, GONDER'e basin.
+   Alt penceredeki "Durum" listesinde her satirin sonucunu gorursunuz.
+3) AL     : Teraziden PLU okur. IP/Port yazin, AL'a basin, PLU araligini
+   girin (orn 1-100). Bulunan PLU'lar import ile ayni formatta bir .xlsx
+   dosyasina kaydedilir (nereye kaydedilecegi sorulur).
+4) PLU Listesi Yazdir (80mm) : Secili Excel'deki PLU + urun adlarini 80mm
+   fis yazicisina basar. "Sona bos satir" kutusuna sayi girerseniz, listenin
+   sonuna son PLU'dan devam eden o kadar bos (elle doldurulacak) satir ekler.
+
+TERMINAL UYGULAMASI (novempos-cli - komut satiri)
+--------------------------------------------------
+GUI'deki tum islemler komut satirindan da yapilabilir. Baslat menusunden
+"Novempos Terminal" ile bir komut istemi acilir (uygulama klasorunde), veya
+kendi komut isteminizde uygulama klasorune girip novempos-cli calistirin.
+
+  KOMUTLAR:
+    novempos-cli send     --excel <dosya.xlsx>   -> teraziye PLU gonder
+    novempos-cli receive  --out <dosya.xlsx>     -> teraziden PLU oku, kaydet
+    novempos-cli print    --excel <dosya.xlsx>   -> 80mm yaziciya liste bas
+    novempos-cli help                            -> tum parametreler
+
+  ORTAK (terazi):  --ip <ip>  --port <n>  --model <n>  --datatype <n>
+                   --encoding <ad>  --timeout <sn>
+     (Verilmezse GUI'nin kaydettigi ayarlar kullanilir.)
+
+  send    : --excel <dosya>   (zorunlu)
+  receive : --out <dosya>      (zorunlu)   --from <n>  --to <n>  --dept <n>
+  print   : --excel <dosya>    (zorunlu)   --printer <ad>  --blank <n>  --font <punto>
+
+  ORNEKLER:
+    novempos-cli send --excel C:\plu\liste.xlsx --ip 192.168.1.1
+    novempos-cli receive --out C:\plu\terazi.xlsx --from 1 --to 500
+    novempos-cli print --excel C:\plu\liste.xlsx --printer "XP-80C" --blank 10
+
+  * Islemi kesmek icin Ctrl+C. Cikis kodu 0 = basarili.
+  * Ayrintili yardim: novempos-cli help
+
+
+KURULUMSUZ / GELISTIRICI
+------------------------
+Kurulum yapmadan da calistirilabilir: once bin\Release\register.bat dosyasina
+SAG TIK > "Yonetici olarak calistir" (OCX'i kaydeder), sonra
+bin\Release\NovemposTerazi.exe calistirin. (Windows 11'de .NET Framework 4.8
+yerlesiktir.) Kaynak koddan derlemek: GUI icin CasScaleSender.csproj, terminal
+icin cli\NovemposCli.csproj -> x86 / Release olarak derleyin (Visual Studio
+2019/2022 veya "dotnet build"). Kurulum paketini yeniden uretmek: once iki
+projeyi de Release derleyin, sonra installer\installer.iss dosyasini Inno Setup
+ile derleyin.
+
+
+EXCEL FORMATI
+-------------
+Ilk satir baslik olmali. Su kolon adlari kullanilir (fazlasi/eksigi olabilir):
+  Department No | PLU No | PLU Type | ItemCode | Name | Name2 | Name3 |
+  Group No | ExeBarcode | Label No | Aux Label No | Origin No |
+  Unit Weight | FixedWeight | Prefix | Pieces | Qty Unit No | Price |
+  Use Fixed Price Type
+
+- Bos birakilan alanlar guvenli varsayilanlarla doldurulur.
+- PLU Type: 1 = tartili, 2 = adet.
+- Price (Fiyat): terazinin TAM SAYI birimindedir. Ornek 55,00 TL -> 5500
+  yazin. ("55.00" yazarsaniz da 5500 olarak yorumlanir.)
+
+
+AYARLAR (kalici, elle de duzenlenebilir)
+-----------------------------------------
+Ayarlar su dosyada tutulur:  %APPDATA%\Novempos\ayarlar.txt
+(Adres cubuguna %APPDATA%\Novempos yazarak ulasabilirsiniz.)
+  ip=192.168.1.1
+  port=20304
+  model=5000          -> CL5000 ailesi (CL3000 protokol uyumlu)
+  pludatatype=98      -> PLU V06  (gerekirse 97=V05, 9=V02 deneyin)
+  encoding=windows-1254  -> Turkce karakter kod sayfasi
+
+
+ONEMLI NOTLAR / SORUN GIDERME
+-----------------------------
+* "OCX yuklenemedi" hatasi -> register.bat'i YONETICI olarak calistirmadiniz.
+* Program 32-bit'tir (OCX 32-bit oldugu icin zorunlu). Kaynaktan derlerken
+  Platform = x86 olmali.
+* Once 1-2 satirlik kucuk bir Excel ile deneyin (elinizdeki osmanabi.xlsx
+  2 satir - ideal). Terazide PLU'lari kontrol edip sonra tum listeyi basin.
+* Terazi hic yanit vermiyorsa:
+    - IP/Port dogru mu? (terazi menusunden agi statik IP yapin, port 20304)
+    - Ayni agda misiniz, ping atiyor mu?
+    - model / pludatatype degerlerini yukaridaki alternatiflerle deneyin.
+* "Label No" bos ise 1 kullanilir; bu etiket formati terazide tanimli olmali,
+  yoksa PLU gider ama etiket basiminda sorun cikabilir.
+* Turkce karakter (c,s,g,i,o,u) gorunumu terazinin font/kod sayfasina baglidir.
+
+
+DOSYALAR
+--------
+  CasScaleSender.sln / .csproj  -> proje
+  Program.cs                    -> giris noktasi
+  MainForm.cs                   -> arayuz + gonderme mantigi
+  ExcelReader.cs                -> .xlsx okuyucu (harici kutuphane yok)
+  PluBuilder.cs                 -> Excel satirini V06 PLU kaydina cevirir
+  AppSettings.cs                -> ayarlar.txt oku/yaz
+  libs\                         -> CAS interop assembly'leri
+  runtime\                      -> CasScale.ocx + CAS DLL'leri + register.bat
+  bin\Release\                  -> derlenmis hazir program
+========================================================================

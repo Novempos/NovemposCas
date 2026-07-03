@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">x86</Platform>
+    <ProjectGuid>{B2C5D8E4-1A3F-4B6C-9D20-3E7A2C4D5F60}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>CasScaleSender.Cli</RootNamespace>
+    <AssemblyName>novempos-cli</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <!-- OCX 32-bit oldugu icin CLI de x86 derlenmeli -->
+    <PlatformTarget>x86</PlatformTarget>
+    <Prefer32Bit>true</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="AxInterop.CASSCALELib">
+      <HintPath>..\libs\AxInterop.CASSCALELib.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+    <Reference Include="Interop.CASSCALELib">
+      <HintPath>..\libs\Interop.CASSCALELib.dll</HintPath>
+      <EmbedInteropTypes>False</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Ortak cekirdek: GUI ile ayni kaynak dosyalari (link) -->
+    <Compile Include="..\ExcelReader.cs"><Link>shared\ExcelReader.cs</Link></Compile>
+    <Compile Include="..\PluBuilder.cs"><Link>shared\PluBuilder.cs</Link></Compile>
+    <Compile Include="..\PluReader.cs"><Link>shared\PluReader.cs</Link></Compile>
+    <Compile Include="..\XlsxWriter.cs"><Link>shared\XlsxWriter.cs</Link></Compile>
+    <Compile Include="..\PluListPrinter.cs"><Link>shared\PluListPrinter.cs</Link></Compile>
+    <Compile Include="..\AppSettings.cs"><Link>shared\AppSettings.cs</Link></Compile>
+    <!-- CLI'ye ozel -->
+    <Compile Include="Program.cs" />
+    <Compile Include="ScaleHost.cs" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
