@@ -38,12 +38,33 @@ namespace CasScaleSender.Cli
             }
         }
 
+        // --excel veya --json'dan PLU satirlarini yukler. Ikisi de yoksa/gecersizse
+        // hata basar ve null doner (cagiran cikis kodu 2 verir). JSON ve Excel ayni
+        // satir seklini (Dictionary<string,string>) uretir; downstream ayni.
+        private static List<Dictionary<string, string>> LoadPluRows(Dictionary<string, string> o)
+        {
+            string json = Get(o, "json", null);
+            string excel = Get(o, "excel", null);
+            if (!string.IsNullOrWhiteSpace(json))
+            {
+                if (!File.Exists(json)) { Console.Error.WriteLine("JSON dosyasi bulunamadi: " + json); return null; }
+                return JsonPluIo.Read(json);
+            }
+            if (!string.IsNullOrWhiteSpace(excel))
+            {
+                if (!File.Exists(excel)) { Console.Error.WriteLine("Excel dosyasi bulunamadi: " + excel); return null; }
+                return ExcelReader.Read(excel).Rows;
+            }
+            Console.Error.WriteLine("Girdi verin: --json <dosya> veya --excel <dosya.xlsx>.");
+            return null;
+        }
+
         // ---------- SEND ----------
         private static int DoSend(Dictionary<string, string> o, AppSettings cfg)
         {
-            string excel = Get(o, "excel", null);
-            if (string.IsNullOrWhiteSpace(excel) || !File.Exists(excel))
-            { Console.Error.WriteLine("Gecerli bir --excel <dosya.xlsx> verin."); return 2; }
+            var rows = LoadPluRows(o);
+            if (rows == null) return 2;
+            if (rows.Count == 0) { Console.Error.WriteLine("Gonderilecek PLU satiri yok."); return 2; }
 
             string ip = Get(o, "ip", cfg.Ip);
             int port = GetInt(o, "port", cfg.Port);
@@ -52,11 +73,8 @@ namespace CasScaleSender.Cli
             int timeout = GetInt(o, "timeout", 10);
             Encoding enc; try { enc = Encoding.GetEncoding(Get(o, "encoding", cfg.EncodingName)); } catch { enc = Encoding.ASCII; }
 
-            var sheet = ExcelReader.Read(excel);
-            if (sheet.Rows.Count == 0) { Console.Error.WriteLine("Excel'de veri satiri yok."); return 2; }
-
             var recs = new List<string>(); var names = new List<string>();
-            foreach (var row in sheet.Rows)
+            foreach (var row in rows)
             {
                 recs.Add(PluBuilder.BuildV06(row, enc));
                 string n; row.TryGetValue("Name", out n); names.Add(n ?? "");
@@ -77,8 +95,9 @@ namespace CasScaleSender.Cli
         private static int DoReceive(Dictionary<string, string> o, AppSettings cfg)
         {
             string outp = Get(o, "out", null);
-            if (string.IsNullOrWhiteSpace(outp))
-            { Console.Error.WriteLine("Kaydedilecek dosyayi verin: --out <dosya.xlsx>"); return 2; }
+            string jsonOut = Get(o, "json", null);
+            if (string.IsNullOrWhiteSpace(outp) && string.IsNullOrWhiteSpace(jsonOut))
+            { Console.Error.WriteLine("Kaydedilecek dosyayi verin: --out <dosya.xlsx> veya --json <dosya.json>"); return 2; }
 
             string ip = Get(o, "ip", cfg.Ip);
             int port = GetInt(o, "port", cfg.Port);
@@ -102,25 +121,31 @@ namespace CasScaleSender.Cli
 
             Console.WriteLine("Bulunan PLU: " + got.Count);
             if (got.Count == 0) { Console.WriteLine("Kaydedilecek PLU yok."); return 0; }
-            XlsxWriter.Write(outp, PluReader.Columns, got);
-            Console.WriteLine("Kaydedildi: " + outp + " (" + got.Count + " PLU)");
+            if (!string.IsNullOrWhiteSpace(jsonOut))
+            {
+                JsonPluIo.Write(jsonOut, PluReader.Columns, got);
+                Console.WriteLine("Kaydedildi (JSON): " + jsonOut + " (" + got.Count + " PLU)");
+            }
+            if (!string.IsNullOrWhiteSpace(outp))
+            {
+                XlsxWriter.Write(outp, PluReader.Columns, got);
+                Console.WriteLine("Kaydedildi: " + outp + " (" + got.Count + " PLU)");
+            }
             return 0;
         }
 
         // ---------- PRINT ----------
         private static int DoPrint(Dictionary<string, string> o, AppSettings cfg)
         {
-            string excel = Get(o, "excel", null);
-            if (string.IsNullOrWhiteSpace(excel) || !File.Exists(excel))
-            { Console.Error.WriteLine("Gecerli bir --excel <dosya.xlsx> verin."); return 2; }
+            var rows = LoadPluRows(o);
+            if (rows == null) return 2;
 
             int blank = GetInt(o, "blank", 0);
             float font = GetFloat(o, "font", 22f);
             string printer = Get(o, "printer", cfg.PrinterName);
 
-            var sheet = ExcelReader.Read(excel);
             var items = new List<KeyValuePair<string, string>>();
-            foreach (var row in sheet.Rows)
+            foreach (var row in rows)
             {
                 string plu, name;
                 row.TryGetValue("PLU No", out plu);
@@ -215,16 +240,19 @@ ORTAK SECENEKLER (terazi):
   (Terazi ayarlari verilmezse GUI'nin kaydettigi ayarlar.txt'ten okunur.)
 
 send:
-  --excel <dosya>    Gonderilecek .xlsx           (zorunlu)
+  --excel <dosya>    Gonderilecek .xlsx           (--excel VEYA --json)
+  --json <dosya>     Gonderilecek .json           (obje dizisi; POS entegrasyonu)
 
 receive:
-  --out <dosya>      Kaydedilecek .xlsx           (zorunlu)
+  --out <dosya>      Kaydedilecek .xlsx           (--out VEYA --json, ikisi de olur)
+  --json <dosya>     Kaydedilecek .json           (POS entegrasyonu)
   --from <n>         Baslangic PLU No             (varsayilan 1)
   --to <n>           Bitis PLU No                 (varsayilan 100)
   --dept <n>         Departman No                 (varsayilan 1)
 
 print:
-  --excel <dosya>    Yazdirilacak .xlsx           (zorunlu)
+  --excel <dosya>    Yazdirilacak .xlsx           (--excel VEYA --json)
+  --json <dosya>     Yazdirilacak .json           (POS entegrasyonu)
   --printer <ad>     Yazici adi          (varsayilan: sistem varsayilani)
   --blank <n>        Sona bos satir (son PLU'dan devam, ad bos)  (varsayilan 0)
   --font <punto>     Yazi puntosu                 (varsayilan 22)
