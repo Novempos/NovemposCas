@@ -101,7 +101,6 @@ namespace CasScaleSender.Cli
 
             string ip = Get(o, "ip", cfg.Ip);
             int port = GetInt(o, "port", cfg.Port);
-            int model = GetInt(o, "model", cfg.Model);
             int timeout = GetInt(o, "timeout", 10);
             int from = GetInt(o, "from", 1);
             int to = GetInt(o, "to", 100);
@@ -111,13 +110,8 @@ namespace CasScaleSender.Cli
 
             Console.WriteLine(string.Format("Okunuyor: PLU {0}-{1} (departman {2}) <- {3}:{4}", from, to, dept, ip, port));
 
-            List<Dictionary<string, string>> got;
-            using (var host = new ScaleHost(Console.WriteLine))
-            {
-                if (!host.Init()) return 3;
-                HookCancel(host);
-                got = host.RunReceive(ip, port, model, cfg.Version, dept, from, to, timeout * 1000);
-            }
+            // Okuma: CL-Works'un ASCII protokolu ile dogrudan TCP (OCX gerekmez).
+            var got = CasNetReader.Read(ip, port, from, to, dept, timeout * 1000, Console.WriteLine);
 
             Console.WriteLine("Bulunan PLU: " + got.Count);
             if (got.Count == 0) { Console.WriteLine("Kaydedilecek PLU yok."); return 0; }

@@ -54,6 +54,7 @@
     <Compile Include="..\ExcelReader.cs"><Link>shared\ExcelReader.cs</Link></Compile>
     <Compile Include="..\PluBuilder.cs"><Link>shared\PluBuilder.cs</Link></Compile>
     <Compile Include="..\PluReader.cs"><Link>shared\PluReader.cs</Link></Compile>
+    <Compile Include="..\CasNetReader.cs"><Link>shared\CasNetReader.cs</Link></Compile>
     <Compile Include="..\XlsxWriter.cs"><Link>shared\XlsxWriter.cs</Link></Compile>
     <Compile Include="..\PluListPrinter.cs"><Link>shared\PluListPrinter.cs</Link></Compile>
     <Compile Include="..\AppSettings.cs"><Link>shared\AppSettings.cs</Link></Compile>

@@ -22,7 +22,8 @@ namespace CasScaleSender
 
         // Teraziden okuma (AL) durumu
         private bool receiving;
-        private int readPlu, readEnd, readDept, readConsecTimeout;
+        private int readDept;
+        private System.Threading.Thread readThread;
         private List<Dictionary<string, string>> received = new List<Dictionary<string, string>>();
 
         // Teker teker gonderim durumu
@@ -326,7 +327,7 @@ namespace CasScaleSender
 
         private void Ax_RecvEventString(object sender, AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
         {
-            if (receiving) { HandleReadRecv(e); return; }
+            // Okuma artik OCX olay'i degil, dogrudan TCP (CasNetReader) ile yapilir.
             if (!sending || e.iTransType != ACTION_DOWNLOAD) return;
 
             if (e.iResult == RECV_SUCCESS) { StopSendTimer(); okCount++; Info(string.Format("  -> #{0} '{1}' OK", index + 1, PluName(index))); }
@@ -360,18 +361,19 @@ namespace CasScaleSender
         private void CancelOp()
         {
             if (!sending && !receiving) return;
+            if (receiving)
+            {
+                // Okuma arka planda; bayragi indir, worker gorup durur ve o ana kadar
+                // okunanlari FinishReceive kaydeder.
+                receiving = false;
+                Info("Iptal ediliyor...");
+                return;
+            }
             StopSendTimer();
-            bool wasReceiving = receiving;
             sending = false;
-            receiving = false;
             TryDisconnect();
             SetBusy(false);
             Info("Islem iptal edildi.");
-            if (wasReceiving && received.Count > 0)
-            {
-                Info("O ana kadar okunan " + received.Count + " PLU kaydedilebilir.");
-                SavePluXlsx();
-            }
         }
 
         // ---- zaman asimi ----
@@ -383,7 +385,6 @@ namespace CasScaleSender
         private void OnSendTimeout()
         {
             StopSendTimer();
-            if (receiving) { OnReadTimeout(); return; }
             if (!sending) return;
             failCount++;
             Info(string.Format("  -> #{0} '{1}' ZAMAN ASIMI ({2} sn yanit yok)",
@@ -400,12 +401,10 @@ namespace CasScaleSender
         private void StartReceive()
         {
             if (sending || receiving) return;
-            if (ax == null) { Info("OCX yuklu degil - once register.bat calistirin."); return; }
             SaveCfgFromUi();
 
             if (string.IsNullOrWhiteSpace(txtIp.Text)) { Info("Terazi IP giriniz."); return; }
             int port; if (!int.TryParse(txtPort.Text, out port)) { Info("Port sayisal olmali."); return; }
-            int model; if (!int.TryParse(txtModel.Text, out model)) { Info("Model sayisal olmali."); return; }
 
             int start, end;
             if (!ShowRangeDialog(out start, out end)) return;
@@ -415,79 +414,32 @@ namespace CasScaleSender
             string ip = txtIp.Text.Trim();
             received.Clear();
             readDept = 1;
-            readPlu = start; readEnd = end; readConsecTimeout = 0;
 
             log.Items.Clear();
             Info(string.Format("Teraziden okunuyor: PLU {0}-{1} (departman {2})", start, end, readDept));
 
-            int rtnC = ax.ConnectionEx3(ip, port, -1, model, cfg.Version, 97);
-            Info("Baglaniliyor... (ip=" + ip + " port=" + port + ", ret=" + rtnC + ")");
-            if (rtnC <= 0)
-            {
-                Info("Baglanti baslatilamadi. IP/port ve ag baglantisini kontrol edin.");
-                return;
-            }
-
             receiving = true;
             SetBusy(true);
-            ReadNext();
-        }
 
-        // Siradaki PLU'yu terazidenister; cevabi RecvEventString'de gelir.
-        private void ReadNext()
-        {
-            while (readPlu <= readEnd)
+            // Okuma, CL-Works'un ASCII protokolu ile DOGRUDAN TCP uzerinden yapilir (OCX yok).
+            // UI donmasin diye arka plan thread'inde; log/bitis UI thread'ine marshal edilir.
+            // Iptal: 'receiving' bayragi inince CasNetReader donguyu keser.
+            Action<string> logCb = s => { try { BeginInvoke((Action)(() => Info(s))); } catch { } };
+            readThread = new System.Threading.Thread(() =>
             {
-                int rtn = ax.ReadPLU(readDept, readPlu);
-                if (rtn > 0)
-                {
-                    RestartSendTimer(); // 10 sn icinde yanit yoksa zaman asimi
-                    return;
-                }
-                readPlu++; // istek gonderilemedi -> bu PLU'yu atla
-            }
-            FinishReceive();
+                List<Dictionary<string, string>> got;
+                try { got = CasNetReader.Read(ip, port, start, end, readDept, 8000, logCb, () => !receiving); }
+                catch (Exception ex) { logCb("Okuma hatasi: " + ex.Message); got = new List<Dictionary<string, string>>(); }
+                try { BeginInvoke((Action)(() => FinishReceive(got))); } catch { }
+            });
+            readThread.IsBackground = true;
+            readThread.Start();
         }
 
-        private void HandleReadRecv(AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
+        private void FinishReceive(List<Dictionary<string, string>> got)
         {
-            StopSendTimer();
-            readConsecTimeout = 0;
-            if (e.iResult == RECV_SUCCESS)
-            {
-                var d = PluReader.Parse(e.sData);
-                if (d != null)
-                {
-                    received.Add(d);
-                    string nm; d.TryGetValue("Name", out nm);
-                    Info(string.Format("  <- PLU {0} alindi: {1}", readPlu, nm ?? ""));
-                }
-            }
-            // basarisiz/bos -> o numarada PLU yok, sessizce atla
-            readPlu++;
-            ReadNext();
-        }
-
-        private void OnReadTimeout()
-        {
-            if (!receiving) return;
-            readConsecTimeout++;
-            Info(string.Format("  PLU {0}: yanit yok (zaman asimi)", readPlu));
-            if (readConsecTimeout >= 3)
-            {
-                Info("Ust uste yanit alinamadi, okuma durduruldu.");
-                FinishReceive();
-                return;
-            }
-            readPlu++;
-            ReadNext();
-        }
-
-        private void FinishReceive()
-        {
-            StopSendTimer();
             receiving = false;
-            TryDisconnect();
+            received = got ?? new List<Dictionary<string, string>>();
             SetBusy(false);
             Info(string.Format("Okuma bitti. Bulunan PLU: {0}", received.Count));
             if (received.Count == 0) { Info("Kaydedilecek PLU yok."); return; }

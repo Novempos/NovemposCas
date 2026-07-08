@@ -6,9 +6,10 @@ using System.Windows.Forms;
 
 namespace CasScaleSender.Cli
 {
-    // Terazi OCX'ini (AxCasScale) GORUNMEZ bir formda barindirir; GUI ile ayni
-    // olay-tabanli akisi konsol icin calistirir. Mesaj pompasi Application.DoEvents
-    // ile donduruldugu icin COM olaylari (RecvEventString) ayni thread'de gelir.
+    // Terazi OCX'ini (AxCasScale) ekran disindaki bir formda barindirir; GUI ile ayni
+    // olay-tabanli GONDERIM akisini konsol icin calistirir. Mesaj pompasi
+    // Application.DoEvents ile donduruldugu icin COM olaylari ayni thread'de gelir.
+    // (Okuma OCX ile degil, CasNetReader ile dogrudan TCP uzerinden yapilir.)
     public class ScaleHost : Form
     {
         private const int ACTION_DOWNLOAD = 3;
@@ -27,21 +28,23 @@ namespace CasScaleSender.Cli
         private string ip, version;
         private int model, dataType;
 
-        // okuma
-        private bool reading;
-        private int rPlu, rEnd, rDept, rConsec;
-        private List<Dictionary<string, string>> got;
-
         public ScaleHost(Action<string> logger) { log = logger ?? (s => { }); }
-
-        // Formu asla gosterme (sadece OCX barinagi).
-        protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
 
         public bool Init()
         {
             try
             {
-                var force = this.Handle; // form handle'ini olustur
+                // OCX (ActiveX) baglanti/Winsock islemleri icin GERCEK bir pencereye (HWND)
+                // ihtiyac duyar; gorunmez formda ConnectionEx3 rtn=0 donuyordu. Formu ekran
+                // disina alip Show() ederek OCX'e gercek pencere + mesaj dongusu veriyoruz
+                // (kullaniciya gorunmez, taskbar'da yok).
+                ShowInTaskbar = false;
+                FormBorderStyle = FormBorderStyle.None;
+                StartPosition = FormStartPosition.Manual;
+                Location = new Point(-32000, -32000);
+                Size = new Size(1, 1);
+                Show();
+
                 ax = new AxCASSCALELib.AxCasScale();
                 ((ISupportInitialize)ax).BeginInit();
                 ax.Size = new Size(2, 2);
@@ -80,7 +83,7 @@ namespace CasScaleSender.Cli
         {
             this.ip = ip; this.model = model; this.version = version; this.dataType = dataType;
             this.recs = records; this.names = names; this.timeoutMs = timeoutMs;
-            idx = 0; okCount = 0; failCount = 0; done = false; reading = false;
+            idx = 0; okCount = 0; failCount = 0; done = false;
             timer = new System.Windows.Forms.Timer { Interval = timeoutMs };
             timer.Tick += (s, e) => OnTimeout();
 
@@ -112,44 +115,9 @@ namespace CasScaleSender.Cli
             done = true;
         }
 
-        // ---- OKUMA ----
-        public List<Dictionary<string, string>> RunReceive(string ip, int port, int model, string version,
-                             int dept, int from, int to, int timeoutMs)
-        {
-            this.ip = ip; this.model = model; this.version = version;
-            this.timeoutMs = timeoutMs;
-            rPlu = from; rEnd = to; rDept = dept; rConsec = 0;
-            got = new List<Dictionary<string, string>>();
-            done = false; reading = true;
-            timer = new System.Windows.Forms.Timer { Interval = timeoutMs };
-            timer.Tick += (s, e) => OnTimeout();
-
-            int rc = ax.ConnectionEx3(ip, port, -1, model, version, 97);
-            log("Baglaniliyor... (ip=" + ip + " port=" + port + ", ret=" + rc + ")");
-            if (rc <= 0) { log("Baglanti kurulamadi. IP/port ve agi kontrol edin."); Disconnect(); return got; }
-
-            ReadNext();
-            Pump();
-            Disconnect();
-            return got;
-        }
-
-        private void ReadNext()
-        {
-            while (rPlu <= rEnd)
-            {
-                if (canceled) { done = true; return; }
-                int rtn = ax.ReadPLU(rDept, rPlu);
-                if (rtn > 0) { StartTimer(); return; }
-                rPlu++;
-            }
-            done = true;
-        }
-
         // ---- OLAYLAR ----
         private void OnRecvString(object sender, AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
         {
-            if (reading) { OnReadRecv(e); return; }
             if (e.iTransType != ACTION_DOWNLOAD) return;
             StopTimer();
             if (e.iResult == RECV_SUCCESS) { okCount++; log(string.Format("  -> #{0} OK", idx + 1)); }
@@ -159,36 +127,9 @@ namespace CasScaleSender.Cli
             SendNext();
         }
 
-        private void OnReadRecv(AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
-        {
-            StopTimer();
-            rConsec = 0;
-            if (e.iResult == RECV_SUCCESS)
-            {
-                var d = PluReader.Parse(e.sData);
-                if (d != null)
-                {
-                    got.Add(d);
-                    string nm; d.TryGetValue("Name", out nm);
-                    log(string.Format("  <- PLU {0} alindi: {1}", rPlu, nm ?? ""));
-                }
-            }
-            rPlu++;
-            ReadNext();
-        }
-
         private void OnTimeout()
         {
             StopTimer();
-            if (reading)
-            {
-                rConsec++;
-                log(string.Format("  PLU {0}: yanit yok (zaman asimi)", rPlu));
-                if (rConsec >= 3) { log("Ust uste yanit alinamadi, okuma durduruldu."); done = true; return; }
-                rPlu++;
-                ReadNext();
-                return;
-            }
             failCount++;
             log(string.Format("  -> #{0} ZAMAN ASIMI ({1} sn yanit yok)", idx + 1, timeoutMs / 1000));
             log("Gonderim durduruldu.");
