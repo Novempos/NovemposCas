@@ -16,8 +16,10 @@ namespace CasScaleSender
         private AxCASSCALELib.AxCasScale ax;
         private AppSettings cfg;
 
-        private TextBox txtExcel, txtIp, txtPort, txtModel, txtDataType, txtBlankRows;
+        private TextBox txtExcel, txtBlankRows;
         private Button btnBrowse, btnSend, btnReceive, btnCancel, btnPrint;
+        private Button btnAddScale, btnEditScale, btnDelScale, btnTestScale;
+        private CheckedListBox lstScales;
         private ListBox log;
 
         // Teraziden okuma (AL) durumu
@@ -26,13 +28,15 @@ namespace CasScaleSender
         private System.Threading.Thread readThread;
         private List<Dictionary<string, string>> received = new List<Dictionary<string, string>>();
 
-        // Teker teker gonderim durumu
+        // Coklu gonderim durumu
         private List<string> records = new List<string>();
         private List<string> names = new List<string>();
         private int index;
-        private int okCount, failCount;
-        private string sendIp;
-        private int sendModel, sendDataType;
+        private int okCount, failCount;            // aktif terazi
+        private int totalOk, totalFail;            // tum teraziler
+        private string sendIp; private int sendPort, sendModel, sendDataType;
+        private List<ScaleConfig> sendQueue = new List<ScaleConfig>();
+        private int sendScaleIdx;
         private bool sending;
         private System.Windows.Forms.Timer sendTimer;
         private const int SEND_TIMEOUT_MS = 10000; // terazi yaniti icin bekleme suresi (10 sn)
@@ -42,6 +46,9 @@ namespace CasScaleSender
             cfg = AppSettings.Load();
             BuildUi();
             InitOcx();
+            RefreshScaleList();
+            // Tek terazi varsa otomatik isaretle (tek-terazi kullanicilari icin kolaylik).
+            if (lstScales.Items.Count == 1) lstScales.SetItemChecked(0, true);
         }
 
         private void BuildUi()
@@ -49,64 +56,62 @@ namespace CasScaleSender
             Text = "Novempos - Terazi PLU Gonderici";
             LoadWindowIcon();
             Font = new Font("Segoe UI", 9f);
-            ClientSize = new Size(600, 500);
+            ClientSize = new Size(660, 600);
             StartPosition = FormStartPosition.CenterScreen;
-            MinimumSize = new Size(540, 440);
+            MinimumSize = new Size(680, 520);
 
-            int x1 = 12, x2 = 130, w = 300, y = 15, h = 26, gap = 36;
+            int x1 = 12, y = 15, h = 26;
 
-            Add(new Label { Text = "Excel dosyasi:", Left = x1, Top = y + 4, Width = 110 });
-            txtExcel = new TextBox { Left = x2, Top = y, Width = w - 90, Text = cfg.LastExcel, Anchor = LR() };
-            btnBrowse = new Button { Text = "Sec...", Left = x2 + w - 84, Top = y - 1, Width = 74, Height = h, Anchor = TR() };
+            // --- Excel dosyasi ---
+            Add(new Label { Text = "Excel dosyasi:", Left = x1, Top = y + 4, Width = 90 });
+            txtExcel = new TextBox { Left = 108, Top = y, Width = ClientSize.Width - 108 - 12 - 78, Text = cfg.LastExcel, Anchor = LR() };
+            btnBrowse = new Button { Text = "Sec...", Left = ClientSize.Width - 12 - 72, Top = y - 1, Width = 72, Height = h, Anchor = TR() };
             btnBrowse.Click += (s, e) => Browse();
             Add(txtExcel); Add(btnBrowse);
 
-            y += gap;
-            Add(new Label { Text = "Terazi IP:", Left = x1, Top = y + 4, Width = 110 });
-            txtIp = new TextBox { Left = x2, Top = y, Width = 160, Text = cfg.Ip };
-            Add(txtIp);
+            // --- Terazi listesi ---
+            y += 34;
+            Add(new Label { Text = "Teraziler (GONDER: coklu isaretle · AL: tek isaretle · en fazla 10):", Left = x1, Top = y, Width = 520 });
+            y += 25; // etiket ile liste arasinda biraz nefes payi
+            lstScales = new CheckedListBox
+            {
+                Left = x1,
+                Top = y,
+                Width = 430,
+                Height = 140,
+                CheckOnClick = true,
+                IntegralHeight = false,
+                Anchor = AnchorStyles.Top | AnchorStyles.Left
+            };
+            Add(lstScales);
 
-            y += gap;
-            Add(new Label { Text = "Port:", Left = x1, Top = y + 4, Width = 110 });
-            txtPort = new TextBox { Left = x2, Top = y, Width = 160, Text = cfg.Port.ToString() };
-            Add(txtPort);
+            int bx = x1 + 430 + 10, bw = 190;
+            btnAddScale = ScaleBtn("Terazi Ekle", bx, y, bw); btnAddScale.Click += (s, e) => AddScale();
+            btnEditScale = ScaleBtn("Duzenle", bx, y + 34, bw); btnEditScale.Click += (s, e) => EditScale();
+            btnTestScale = ScaleBtn("Baglantiyi Test Et", bx, y + 68, bw); btnTestScale.Click += (s, e) => TestScale();
+            btnDelScale = ScaleBtn("Sil", bx, y + 102, bw); btnDelScale.Click += (s, e) => DeleteScale();
 
-            y += gap;
-            Add(new Label { Text = "Model:", Left = x1, Top = y + 4, Width = 110 });
-            txtModel = new TextBox { Left = x2, Top = y, Width = 80, Text = cfg.Model.ToString() };
-            Add(new Label { Text = "(5000 = CL5000/CL3000)", Left = x2 + 88, Top = y + 4, Width = 200, ForeColor = Color.Gray });
-            Add(txtModel);
-
-            y += gap;
-            Add(new Label { Text = "PLU veri tipi:", Left = x1, Top = y + 4, Width = 110 });
-            txtDataType = new TextBox { Left = x2, Top = y, Width = 80, Text = cfg.PluDataType.ToString() };
-            Add(new Label { Text = "(98=V06, 97=V05, 9=V02)", Left = x2 + 88, Top = y + 4, Width = 200, ForeColor = Color.Gray });
-            Add(txtDataType);
-
-            y += gap + 4;
-            btnSend = new Button { Text = "GONDER", Left = x2, Top = y, Width = 100, Height = 34, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+            // --- Aksiyonlar ---
+            y += 150;
+            btnSend = new Button { Text = "GONDER", Left = x1, Top = y, Width = 120, Height = 36, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             btnSend.Click += (s, e) => StartSend();
-            Add(btnSend);
-
-            btnReceive = new Button { Text = "AL", Left = x2 + 106, Top = y, Width = 54, Height = 34, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
+            btnReceive = new Button { Text = "AL", Left = x1 + 128, Top = y, Width = 70, Height = 36, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };
             btnReceive.Click += (s, e) => StartReceive();
-            Add(btnReceive);
-
-            btnCancel = new Button { Text = "IPTAL", Left = x2 + 166, Top = y, Width = 74, Height = 34, Enabled = false };
+            btnCancel = new Button { Text = "IPTAL", Left = x1 + 206, Top = y, Width = 80, Height = 36, Enabled = false };
             btnCancel.Click += (s, e) => CancelOp();
-            Add(btnCancel);
-
-            btnPrint = new Button { Text = "PLU Yazdir (80mm)", Left = x2 + 250, Top = y, Width = 180, Height = 34 };
+            btnPrint = new Button { Text = "PLU Yazdir (80mm)", Left = x1 + 300, Top = y, Width = 170, Height = 36 };
             btnPrint.Click += (s, e) => PrintPluList();
-            Add(btnPrint);
+            Add(btnSend); Add(btnReceive); Add(btnCancel); Add(btnPrint);
 
+            // --- Yazdirma bos satir ---
             y += 46;
             Add(new Label { Text = "Yazdirmada sona bos satir:", Left = x1, Top = y + 4, Width = 165 });
             txtBlankRows = new TextBox { Left = x1 + 168, Top = y, Width = 55, Text = cfg.BlankRows.ToString() };
             Add(txtBlankRows);
             Add(new Label { Text = "(son PLU'dan devam, ad bos)", Left = x1 + 230, Top = y + 4, Width = 240, ForeColor = Color.Gray });
 
-            y += 36;
+            // --- Durum log ---
+            y += 34;
             Add(new Label { Text = "Durum:", Left = x1, Top = y, Width = 110 });
             y += 20;
             log = new ListBox { Left = x1, Top = y, Width = ClientSize.Width - 24, Height = ClientSize.Height - y - 12, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
@@ -115,7 +120,14 @@ namespace CasScaleSender
             sendTimer = new System.Windows.Forms.Timer { Interval = SEND_TIMEOUT_MS };
             sendTimer.Tick += (s, e) => OnSendTimeout();
 
-            FormClosing += (s, e) => { StopSendTimer(); SaveCfgFromUi(); TryDisconnect(); };
+            FormClosing += (s, e) => { StopSendTimer(); SaveCfgFromUi(); TryDisconnect(sendIp); };
+        }
+
+        private Button ScaleBtn(string t, int x, int y, int w)
+        {
+            var b = new Button { Text = t, Left = x, Top = y, Width = w, Height = 28 };
+            Add(b);
+            return b;
         }
 
         // Novempos ikonu exe'ye gomulu; baslik cubugu ve Alt+Tab icin yukler.
@@ -155,6 +167,86 @@ namespace CasScaleSender
             }
         }
 
+        // ---- Terazi listesi yonetimi ----
+
+        // Isaretli terazileri dondurur (GONDER coklu, AL tek).
+        private List<ScaleConfig> CheckedScales()
+        {
+            var list = new List<ScaleConfig>();
+            foreach (var o in lstScales.CheckedItems) { var sc = o as ScaleConfig; if (sc != null) list.Add(sc); }
+            return list;
+        }
+
+        // cfg.Scales'ten listeyi yeniden kurar; isaretleri IP:Port'a gore korur.
+        private void RefreshScaleList()
+        {
+            var wasChecked = new HashSet<string>();
+            foreach (var sc in CheckedScales()) wasChecked.Add(Key(sc));
+
+            lstScales.Items.Clear();
+            foreach (var sc in cfg.Scales)
+            {
+                int i = lstScales.Items.Add(sc);
+                if (wasChecked.Contains(Key(sc))) lstScales.SetItemChecked(i, true);
+            }
+        }
+
+        private static string Key(ScaleConfig sc) { return sc.Ip + ":" + sc.Port; }
+
+        private void AddScale()
+        {
+            if (cfg.Scales.Count >= AppSettings.MaxScales)
+            { Warn("En fazla " + AppSettings.MaxScales + " terazi eklenebilir."); return; }
+            using (var f = new ScaleEditForm(null, "Terazi Ekle"))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK || f.Result == null) return;
+                cfg.Scales.Add(f.Result);
+                cfg.Save();
+                RefreshScaleList();
+                // Yeni ekleneni otomatik isaretle.
+                int last = lstScales.Items.Count - 1;
+                if (last >= 0) lstScales.SetItemChecked(last, true);
+            }
+        }
+
+        private void EditScale()
+        {
+            int i = lstScales.SelectedIndex;
+            if (i < 0) { Warn("Duzenlemek icin listeden bir terazi secin."); return; }
+            using (var f = new ScaleEditForm(cfg.Scales[i].Clone(), "Terazi Duzenle"))
+            {
+                if (f.ShowDialog(this) != DialogResult.OK || f.Result == null) return;
+                cfg.Scales[i] = f.Result;
+                cfg.Save();
+                RefreshScaleList();
+            }
+        }
+
+        private void DeleteScale()
+        {
+            int i = lstScales.SelectedIndex;
+            if (i < 0) { Warn("Silmek icin listeden bir terazi secin."); return; }
+            var sc = cfg.Scales[i];
+            if (MessageBox.Show(this, "'" + sc.Name + "' silinsin mi?", "Terazi Sil",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            cfg.Scales.RemoveAt(i);
+            cfg.Save();
+            RefreshScaleList();
+        }
+
+        private void TestScale()
+        {
+            int i = lstScales.SelectedIndex;
+            if (i < 0) { Warn("Test icin listeden bir terazi secin."); return; }
+            var sc = cfg.Scales[i];
+            Info("Baglanti testi: " + sc.Name + " (" + sc.Ip + ":" + sc.Port + ")...");
+            string msg;
+            bool ok = CasNetReader.TestConnection(sc.Ip, sc.Port, 4000, out msg);
+            Info((ok ? "  OK: " : "  BASARISIZ: ") + msg);
+            MessageBox.Show(this, msg, "Baglanti Testi", MessageBoxButtons.OK,
+                ok ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+        }
+
         private void Browse()
         {
             using (var d = new OpenFileDialog { Filter = "Excel (*.xlsx)|*.xlsx|Tum dosyalar (*.*)|*.*" })
@@ -165,7 +257,6 @@ namespace CasScaleSender
         }
 
         // Secili Excel'den sadece "PLU No" + "Name" alarak 80mm yaziciya liste basar.
-        // Teraziyle/OCX ile ilgisi yok; ayri calisir.
         private void PrintPluList()
         {
             if (string.IsNullOrWhiteSpace(txtExcel.Text) || !System.IO.File.Exists(txtExcel.Text))
@@ -187,7 +278,6 @@ namespace CasScaleSender
 
             int realCount = items.Count;
 
-            // Sona eklenecek bos satirlar: son PLU'dan devam eden numara, urun adi bos.
             int blankCount = 0;
             int.TryParse(txtBlankRows.Text, out blankCount);
             if (blankCount < 0) blankCount = 0;
@@ -229,7 +319,6 @@ namespace CasScaleSender
             }
         }
 
-        // Metindeki rakamlari alip tam sayiya cevirir (yoksa 0).
         private static int DigitsToInt(string s)
         {
             if (string.IsNullOrEmpty(s)) return 0;
@@ -239,19 +328,19 @@ namespace CasScaleSender
             return (sb.Length > 0 && int.TryParse(sb.ToString(), out v)) ? v : 0;
         }
 
+        // ---- GONDER (coklu terazi) ----
+
         private void StartSend()
         {
-            if (sending) return;
+            if (sending || receiving) return;
             if (ax == null) { Info("OCX yuklu degil - once register.bat calistirin."); return; }
             SaveCfgFromUi();
 
+            var scales = CheckedScales();
+            if (scales.Count == 0) { Info("GONDER icin en az bir terazi isaretleyin."); return; }
+
             if (string.IsNullOrWhiteSpace(txtExcel.Text) || !System.IO.File.Exists(txtExcel.Text))
             { Info("Once gecerli bir Excel dosyasi secin."); return; }
-            if (string.IsNullOrWhiteSpace(txtIp.Text)) { Info("Terazi IP giriniz."); return; }
-
-            int port; if (!int.TryParse(txtPort.Text, out port)) { Info("Port sayisal olmali."); return; }
-            int model; if (!int.TryParse(txtModel.Text, out model)) { Info("Model sayisal olmali."); return; }
-            int dataType; if (!int.TryParse(txtDataType.Text, out dataType)) { Info("PLU veri tipi sayisal olmali."); return; }
 
             Encoding enc;
             try { enc = Encoding.GetEncoding(cfg.EncodingName); } catch { enc = Encoding.ASCII; }
@@ -259,10 +348,8 @@ namespace CasScaleSender
             ExcelReader.Sheet sheet;
             try { sheet = ExcelReader.Read(txtExcel.Text); }
             catch (Exception ex) { Info("Excel okunamadi: " + ex.Message); return; }
-
             if (sheet.Rows.Count == 0) { Info("Excel'de veri satiri yok."); return; }
 
-            // Kayitlari onceden hazirla
             records.Clear(); names.Clear();
             foreach (var row in sheet.Rows)
             {
@@ -272,32 +359,37 @@ namespace CasScaleSender
             }
 
             log.Items.Clear();
-            Info("Excel okundu. Satir: " + sheet.Rows.Count);
-            Info("Basliklar: " + string.Join(", ", sheet.Headers));
+            Info("Excel okundu. Satir: " + sheet.Rows.Count + "  |  Hedef terazi: " + scales.Count);
 
-            sendIp = txtIp.Text.Trim();
-            sendModel = model;
-            sendDataType = dataType;
-            index = 0; okCount = 0; failCount = 0;
+            sendQueue = scales;
+            sendScaleIdx = 0;
+            totalOk = 0; totalFail = 0;
             sending = true;
             SetBusy(true);
+            SendToScale(0);
+        }
 
-            int rtnC = ax.ConnectionEx3(sendIp, port, -1, sendModel, cfg.Version, 97);
-            Info("Baglaniliyor... (ip=" + sendIp + " port=" + port + ", ret=" + rtnC + ")");
+        // Sirasidaki teraziye baglanip tum PLU'lari gonderir.
+        private void SendToScale(int idx)
+        {
+            var sc = sendQueue[idx];
+            sendIp = sc.Ip; sendPort = sc.Port; sendModel = sc.Model; sendDataType = sc.DataType;
+            index = 0; okCount = 0; failCount = 0;
+
+            Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
+            int rtnC = ax.ConnectionEx3(sendIp, sendPort, -1, sendModel, cfg.Version, 97);
+            Info("  Baglaniliyor... ret=" + rtnC);
             if (rtnC <= 0)
             {
-                Info("Baglanti baslatilamadi. IP/port ve ag baglantisini kontrol edin.");
-                sending = false; SetBusy(false);
+                Info("  Baglanti kurulamadi, bu terazi atlandi.");
+                totalFail += records.Count;
+                AdvanceScale();
                 return;
             }
-
-            // Ilk PLU'yu gonder; sonrakiler her OK/FAIL cevabinda tek tek gider.
             SendNext();
         }
 
-        // Siradaki PLU'yu gonderir. Basarili kuyruklamada terazi cevabini bekler
-        // (Ax_RecvEventString bir sonrakini tetikler). Kuyruklama hemen basarisiz
-        // olursa (ret<=0) o kaydi atlayip bir sonrakine gecer.
+        // Siradaki PLU'yu gonderir; terazi cevabini Ax_RecvEventString bekler.
         private void SendNext()
         {
             while (index < records.Count)
@@ -306,16 +398,36 @@ namespace CasScaleSender
                 int rtn = ax.SendDataString(sendIp, -1, sendModel, cfg.Version, ACTION_DOWNLOAD, sendDataType, records[i]);
                 if (rtn > 0)
                 {
-                    RestartSendTimer(); // 10 sn icinde yanit gelmezse zaman asimi
-                    Info(string.Format("  #{0} '{1}' gonderildi, terazi yaniti bekleniyor...", i + 1, names[i]));
-                    return; // cevabi Ax_RecvEventString'de bekle
+                    RestartSendTimer();
+                    Info(string.Format("  #{0} '{1}' gonderildi, yanit bekleniyor...", i + 1, names[i]));
+                    return;
                 }
-                // Kuyruga alinamadi -> bu kaydi basarisiz say, hemen sonrakine gec
                 failCount++;
                 Info(string.Format("  #{0} '{1}' KUYRUGA ALINAMADI (ret={2})", i + 1, names[i], rtn));
                 index++;
             }
-            Finish();
+            ScaleDone();
+        }
+
+        // Aktif terazi bitti -> toplamlara ekle, baglantiyi kapat, sonrakine gec.
+        private void ScaleDone()
+        {
+            StopSendTimer();
+            Info(string.Format("  Bitti. Basarili: {0}, Basarisiz: {1}", okCount, failCount));
+            totalOk += okCount; totalFail += failCount;
+            TryDisconnect(sendIp);
+            AdvanceScale();
+        }
+
+        private void AdvanceScale()
+        {
+            if (!sending) { SetBusy(false); return; } // iptal edilmis
+            sendScaleIdx++;
+            if (sendScaleIdx < sendQueue.Count) { SendToScale(sendScaleIdx); return; }
+            sending = false;
+            SetBusy(false);
+            Info(string.Format("=== TUMU TAMAM. {0} terazi | Toplam basarili: {1}, basarisiz: {2} ===",
+                sendQueue.Count, totalOk, totalFail));
         }
 
         // ---- OCX olaylari ----
@@ -340,20 +452,15 @@ namespace CasScaleSender
 
         private string PluName(int i) { return (i >= 0 && i < names.Count) ? names[i] : ""; }
 
-        private void Finish()
-        {
-            StopSendTimer();
-            sending = false;
-            Info(string.Format("TAMAMLANDI. Basarili: {0}, Basarisiz: {1}", okCount, failCount));
-            TryDisconnect();
-            SetBusy(false);
-        }
-
         private void SetBusy(bool busy)
         {
             btnSend.Enabled = !busy;
             btnReceive.Enabled = !busy;
             btnPrint.Enabled = !busy;
+            btnAddScale.Enabled = !busy;
+            btnEditScale.Enabled = !busy;
+            btnDelScale.Enabled = !busy;
+            btnTestScale.Enabled = !busy;
             btnCancel.Enabled = busy;
         }
 
@@ -363,17 +470,15 @@ namespace CasScaleSender
             if (!sending && !receiving) return;
             if (receiving)
             {
-                // Okuma arka planda; bayragi indir, worker gorup durur ve o ana kadar
-                // okunanlari FinishReceive kaydeder.
-                receiving = false;
+                receiving = false; // worker gorup durur; FinishReceive kaydeder
                 Info("Iptal ediliyor...");
                 return;
             }
             StopSendTimer();
             sending = false;
-            TryDisconnect();
+            TryDisconnect(sendIp);
             SetBusy(false);
-            Info("Islem iptal edildi.");
+            Info("Gonderim iptal edildi.");
         }
 
         // ---- zaman asimi ----
@@ -381,7 +486,7 @@ namespace CasScaleSender
         private void RestartSendTimer() { sendTimer.Stop(); sendTimer.Start(); }
         private void StopSendTimer() { if (sendTimer != null) sendTimer.Stop(); }
 
-        // 10 sn icinde terazi yaniti gelmezse: islemi durdur, butonlari geri ac.
+        // 10 sn icinde terazi yaniti gelmezse: bu terazide durdur, sonrakine gec.
         private void OnSendTimeout()
         {
             StopSendTimer();
@@ -389,41 +494,45 @@ namespace CasScaleSender
             failCount++;
             Info(string.Format("  -> #{0} '{1}' ZAMAN ASIMI ({2} sn yanit yok)",
                 index + 1, PluName(index), SEND_TIMEOUT_MS / 1000));
-            Info(string.Format("Gonderim durduruldu. (Basarili: {0}, Basarisiz: {1})", okCount, failCount));
-            Info("Terazi baglantisini / IP-Port'u kontrol edip tekrar deneyin.");
-            sending = false;
-            TryDisconnect();
-            SetBusy(false);
+            Info("  Bu terazide gonderim durduruldu, sonraki teraziye geciliyor.");
+            totalOk += okCount; totalFail += failCount;
+            TryDisconnect(sendIp);
+            AdvanceScale();
         }
 
-        // ---- teraziden okuma (AL) ----
+        // ---- teraziden okuma (AL) — TEK terazi ----
 
         private void StartReceive()
         {
             if (sending || receiving) return;
             SaveCfgFromUi();
 
-            if (string.IsNullOrWhiteSpace(txtIp.Text)) { Info("Terazi IP giriniz."); return; }
-            int port; if (!int.TryParse(txtPort.Text, out port)) { Info("Port sayisal olmali."); return; }
+            var checkedScales = CheckedScales();
+            if (checkedScales.Count == 0) { Info("AL icin bir terazi isaretleyin."); return; }
+            if (checkedScales.Count > 1)
+            {
+                Info("AL icin yalnizca TEK terazi isaretleyin (su an " + checkedScales.Count + " secili).");
+                Warn("Teraziden okuma tek terazi ile yapilir.\r\nLutfen listeden yalnizca BIR terazi isaretleyin.");
+                return;
+            }
+            var sc = checkedScales[0];
 
             int start, end;
             if (!ShowRangeDialog(out start, out end)) return;
             if (start < 1) start = 1;
             if (end < start) { Info("Bitis PLU, baslangictan kucuk olamaz."); return; }
 
-            string ip = txtIp.Text.Trim();
+            string ip = sc.Ip; int port = sc.Port;
             received.Clear();
             readDept = 1;
 
             log.Items.Clear();
-            Info(string.Format("Teraziden okunuyor: PLU {0}-{1} (departman {2})", start, end, readDept));
+            Info(string.Format("Teraziden okunuyor: {0} ({1}:{2}) — PLU {3}-{4}", sc.Name, ip, port, start, end));
 
             receiving = true;
             SetBusy(true);
 
-            // Okuma, CL-Works'un ASCII protokolu ile DOGRUDAN TCP uzerinden yapilir (OCX yok).
-            // UI donmasin diye arka plan thread'inde; log/bitis UI thread'ine marshal edilir.
-            // Iptal: 'receiving' bayragi inince CasNetReader donguyu keser.
+            // Okuma, CL-Works'un ASCII protokolu ile DOGRUDAN TCP uzerinden (OCX yok).
             Action<string> logCb = s => { try { BeginInvoke((Action)(() => Info(s))); } catch { } };
             readThread = new System.Threading.Thread(() =>
             {
@@ -490,20 +599,22 @@ namespace CasScaleSender
 
         // ---- yardimcilar ----
 
-        private void TryDisconnect()
+        private void TryDisconnect(string ip)
         {
-            try { if (ax != null) ax.DisconnectOneEx(txtIp.Text.Trim(), -1); } catch { }
+            if (string.IsNullOrWhiteSpace(ip)) return;
+            try { if (ax != null) ax.DisconnectOneEx(ip, -1); } catch { }
         }
 
         private void SaveCfgFromUi()
         {
             cfg.LastExcel = txtExcel.Text.Trim();
-            cfg.Ip = txtIp.Text.Trim();
-            int p; if (int.TryParse(txtPort.Text, out p)) cfg.Port = p;
-            int m; if (int.TryParse(txtModel.Text, out m)) cfg.Model = m;
-            int d; if (int.TryParse(txtDataType.Text, out d)) cfg.PluDataType = d;
             int br; if (txtBlankRows != null && int.TryParse(txtBlankRows.Text, out br)) cfg.BlankRows = br;
-            cfg.Save();
+            cfg.Save(); // Scales zaten ekle/duzenle/sil'de kaydediliyor
+        }
+
+        private void Warn(string m)
+        {
+            MessageBox.Show(this, m, "Novempos Terazi", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private void Info(string s)

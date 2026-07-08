@@ -58,6 +58,8 @@
     <Compile Include="PluBuilder.cs" />
     <Compile Include="PluReader.cs" />
     <Compile Include="CasNetReader.cs" />
+    <Compile Include="ScaleConfig.cs" />
+    <Compile Include="ScaleEditForm.cs" />
     <Compile Include="XlsxWriter.cs" />
     <Compile Include="PluListPrinter.cs" />
     <Compile Include="AppSettings.cs" />

@@ -22,7 +22,7 @@ namespace CasScaleSender.Cli
             if (cmd == "help" || cmd == "-h" || cmd == "--help" || cmd == "/?" || cmd == "?")
             { PrintHelp(); return 0; }
             if (cmd == "version" || cmd == "--version" || cmd == "-v")
-            { Console.WriteLine("novempos-cli 1.6.0"); return 0; }
+            { Console.WriteLine("novempos-cli 1.7.0"); return 0; }
 
             var o = ParseOpts(args, 1);
             var cfg = AppSettings.Load();

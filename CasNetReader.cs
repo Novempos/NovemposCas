@@ -21,6 +21,31 @@ namespace CasScaleSender
     //                       06=Fiyat(4B LE)       0A=Isim(windows-1254)
     public static class CasNetReader
     {
+        // Teraziye TCP baglanti testi (ekleme/duzenleme diyalogundaki "Test" butonu).
+        // Basariliysa true; degilse false + hata mesaji (out).
+        public static bool TestConnection(string ip, int port, int timeoutMs, out string message)
+        {
+            try
+            {
+                using (var cli = new TcpClient())
+                {
+                    if (!cli.ConnectAsync(ip, port).Wait(timeoutMs))
+                    {
+                        message = "Baglanti kurulamadi (zaman asimi). IP/port ve agi kontrol edin.";
+                        return false;
+                    }
+                    message = "Baglanti basarili: " + ip + ":" + port;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                var inner = ex is AggregateException && ex.InnerException != null ? ex.InnerException : ex;
+                message = "Baglanti hatasi: " + inner.Message;
+                return false;
+            }
+        }
+
         public static List<Dictionary<string, string>> Read(
             string ip, int port, int from, int to, int dept, int timeoutMs, Action<string> log,
             Func<bool> cancelled = null)

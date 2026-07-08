@@ -6,7 +6,7 @@
 
 #define AppName      "Novempos Terazi PLU Gonderici"
 #define AppShortName "Novempos Terazi"
-#define AppVersion   "1.6.0"
+#define AppVersion   "1.7.0"
 #define AppPublisher "Novempos"
 #define AppExe       "NovemposTerazi.exe"
 #define CliExe       "novempos-cli.exe"
