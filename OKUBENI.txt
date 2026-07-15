@@ -149,8 +149,9 @@ ONEMLI NOTLAR / SORUN GIDERME
   (Bu hata yalnizca GONDER'i etkiler; AL, OCX olmadan da calisir.)
 * Program 32-bit'tir (OCX 32-bit oldugu icin zorunlu). Kaynaktan derlerken
   Platform = x86 olmali.
-* Once 1-2 satirlik kucuk bir Excel ile deneyin (elinizdeki osmanabi.xlsx
-  2 satir - ideal). Terazide PLU'lari kontrol edip sonra tum listeyi basin.
+* Once 1-2 satirlik kucuk bir Excel ile deneyin (proje klasorundeki
+  ornek_plu.xlsx - 2 satir - ideal). Terazide PLU'lari kontrol edip sonra
+  tum listeyi basin.
 * Terazi hic yanit vermiyorsa:
     - IP/Port dogru mu? (terazi menusunden agi statik IP yapin, port 20304)
     - Ayni agda misiniz, ping atiyor mu?
