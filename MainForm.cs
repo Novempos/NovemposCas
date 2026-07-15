@@ -332,13 +332,15 @@ namespace CasScaleSender
             if (string.IsNullOrWhiteSpace(txtExcel.Text) || !System.IO.File.Exists(txtExcel.Text))
             { Info("Once gecerli bir Excel dosyasi secin."); return; }
 
-            Encoding enc;
-            try { enc = Encoding.GetEncoding(cfg.EncodingName); } catch { enc = Encoding.ASCII; }
+            Encoding enc; bool encFallback = false;
+            try { enc = Encoding.GetEncoding(cfg.EncodingName); }
+            catch { enc = Encoding.ASCII; encFallback = true; }
 
             ExcelReader.Sheet sheet;
             try { sheet = ExcelReader.Read(txtExcel.Text); }
             catch (Exception ex) { Info("Excel okunamadi: " + ex.Message); return; }
-            if (sheet.Rows.Count == 0) { Info("Excel'de veri satiri yok."); return; }
+            if (sheet.Rows.Count == 0)
+            { Info("Excel'de veri satiri yok (not: yalnizca calisma kitabinin ILK sayfasi okunur; veri baska sayfadaysa o sayfayi ilk siraya alin)."); return; }
 
             records.Clear(); names.Clear();
             var overflowErrors = new List<string>();
@@ -365,6 +367,7 @@ namespace CasScaleSender
             if (overflowErrors.Count > 0)
             {
                 log.Items.Clear();
+                if (encFallback) Info("UYARI: '" + cfg.EncodingName + "' kod sayfasi yuklenemedi, ASCII kullanildi (Turkce karakterler bozulabilir).");
                 Info("GONDERIM DURDURULDU: " + overflowErrors.Count + " kayitta alan tasmasi bulundu. Once Excel'i duzeltin.");
                 foreach (var e in overflowErrors) Info("  " + e);
                 int shown = Math.Min(10, overflowErrors.Count);
@@ -375,6 +378,7 @@ namespace CasScaleSender
             }
 
             log.Items.Clear();
+            if (encFallback) Info("UYARI: '" + cfg.EncodingName + "' kod sayfasi yuklenemedi, ASCII kullanildi (Turkce karakterler bozulabilir).");
             Info("Excel okundu. Satir: " + sheet.Rows.Count + "  |  Hedef terazi: " + scales.Count);
 
             sendQueue = scales;

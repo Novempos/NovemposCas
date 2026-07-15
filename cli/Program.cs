@@ -71,7 +71,10 @@ namespace CasScaleSender.Cli
             int model = GetInt(o, "model", cfg.Model);
             int dataType = GetInt(o, "datatype", cfg.PluDataType);
             int timeout = GetInt(o, "timeout", 10);
-            Encoding enc; try { enc = Encoding.GetEncoding(Get(o, "encoding", cfg.EncodingName)); } catch { enc = Encoding.ASCII; }
+            string encName = Get(o, "encoding", cfg.EncodingName);
+            Encoding enc;
+            try { enc = Encoding.GetEncoding(encName); }
+            catch { enc = Encoding.ASCII; Console.Error.WriteLine("UYARI: '" + encName + "' kod sayfasi bulunamadi, ASCII kullanilacak (Turkce karakterler bozulabilir)."); }
 
             var recs = new List<string>(); var names = new List<string>();
             var overflowErrors = new List<string>();
