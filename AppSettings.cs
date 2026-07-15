@@ -102,6 +102,9 @@ namespace CasScaleSender
                 if (map.TryGetValue("port", out val)) int.TryParse(val, out sc.Port);
                 if (map.TryGetValue("model", out val)) int.TryParse(val, out sc.Model);
                 if (map.TryGetValue("datatype", out val)) int.TryParse(val, out sc.DataType);
+                // scaleN.version yoksa (eski ayarlar.txt) eski global "version="a dus,
+                // boylece onceden etkili olan versiyon sessizce kaybolmaz.
+                sc.Version = map.TryGetValue("version", out val) ? val : s.Version;
                 s.Scales.Add(sc);
                 if (s.Scales.Count >= MaxScales) break;
             }
@@ -115,7 +118,8 @@ namespace CasScaleSender
                     Ip = s.Ip,
                     Port = s.Port,
                     Model = s.Model,
-                    DataType = s.PluDataType
+                    DataType = s.PluDataType,
+                    Version = s.Version
                 });
             }
             return s;
@@ -132,6 +136,7 @@ namespace CasScaleSender
                     Port = Scales[0].Port;
                     Model = Scales[0].Model;
                     PluDataType = Scales[0].DataType;
+                    Version = Scales[0].Version;
                 }
 
                 var lines = new List<string>
@@ -156,6 +161,7 @@ namespace CasScaleSender
                     lines.Add("scale" + i + ".port=" + sc.Port);
                     lines.Add("scale" + i + ".model=" + sc.Model);
                     lines.Add("scale" + i + ".datatype=" + sc.DataType);
+                    lines.Add("scale" + i + ".version=" + sc.Version);
                 }
 
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));

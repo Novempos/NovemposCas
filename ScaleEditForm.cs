@@ -11,10 +11,17 @@ namespace CasScaleSender
         private TextBox txtName, txtIp, txtPort, txtModel, txtDataType;
         private Label lblTest;
 
+        // Version alaninin bu diyalogda kendi kutusu yok (AppSettings.Version gibi
+        // cogunlukla bos birakilir, elle ayarlar.txt'te duzenlenir); Duzenle'de
+        // var olan degeri sessizce koruyoruz ki Kaydet, mevcut scaleN.version'i
+        // silmesin.
+        private readonly string existingVersion;
+
         public ScaleConfig Result { get; private set; }
 
         public ScaleEditForm(ScaleConfig existing, string title)
         {
+            existingVersion = existing != null ? existing.Version : "";
             Text = title;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -93,7 +100,7 @@ namespace CasScaleSender
             string name = txtName.Text.Trim();
             if (name.Length == 0) name = ip; // ad bos ise IP'yi ad yap
 
-            Result = new ScaleConfig { Name = name, Ip = ip, Port = port, Model = model, DataType = dt };
+            Result = new ScaleConfig { Name = name, Ip = ip, Port = port, Model = model, DataType = dt, Version = existingVersion };
         }
 
         private void Warn(string m)

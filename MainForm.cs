@@ -34,7 +34,7 @@ namespace CasScaleSender
         private int index;
         private int okCount, failCount;            // aktif terazi
         private int totalOk, totalFail;            // tum teraziler
-        private string sendIp; private int sendPort, sendModel, sendDataType;
+        private string sendIp, sendVersion; private int sendPort, sendModel, sendDataType;
         private List<ScaleConfig> sendQueue = new List<ScaleConfig>();
         private int sendScaleIdx;
         private bool sending;
@@ -399,11 +399,11 @@ namespace CasScaleSender
         private void SendToScale(int idx)
         {
             var sc = sendQueue[idx];
-            sendIp = sc.Ip; sendPort = sc.Port; sendModel = sc.Model; sendDataType = sc.DataType;
+            sendIp = sc.Ip; sendPort = sc.Port; sendModel = sc.Model; sendDataType = sc.DataType; sendVersion = sc.Version;
             index = 0; okCount = 0; failCount = 0;
 
             Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
-            int rtnC = ax.ConnectionEx3(sendIp, sendPort, -1, sendModel, cfg.Version, 97);
+            int rtnC = ax.ConnectionEx3(sendIp, sendPort, -1, sendModel, sendVersion, 97);
             Info("  Baglaniliyor... ret=" + rtnC);
             if (rtnC <= 0)
             {
@@ -421,7 +421,7 @@ namespace CasScaleSender
             while (index < records.Count)
             {
                 int i = index;
-                int rtn = ax.SendDataString(sendIp, -1, sendModel, cfg.Version, ACTION_DOWNLOAD, sendDataType, records[i]);
+                int rtn = ax.SendDataString(sendIp, -1, sendModel, sendVersion, ACTION_DOWNLOAD, sendDataType, records[i]);
                 if (rtn > 0)
                 {
                     RestartSendTimer();
