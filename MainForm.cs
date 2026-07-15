@@ -543,17 +543,17 @@ namespace CasScaleSender
             }
             var sc = checkedScales[0];
 
-            int start, end;
-            if (!ShowRangeDialog(out start, out end)) return;
+            int start, end, dept;
+            if (!ShowRangeDialog(out start, out end, out dept)) return;
             if (start < 1) start = 1;
             if (end < start) { Info("Bitis PLU, baslangictan kucuk olamaz."); return; }
 
             string ip = sc.Ip; int port = sc.Port;
             received.Clear();
-            readDept = 1;
+            readDept = dept;
 
             log.Items.Clear();
-            Info(string.Format("Teraziden okunuyor: {0} ({1}:{2}) — PLU {3}-{4}", sc.Name, ip, port, start, end));
+            Info(string.Format("Teraziden okunuyor: {0} ({1}:{2}) — PLU {3}-{4}, departman {5}", sc.Name, ip, port, start, end, readDept));
 
             receiving = true;
             SetBusy(true);
@@ -595,30 +595,36 @@ namespace CasScaleSender
             }
         }
 
-        // Okunacak PLU araligini soran kucuk pencere.
-        private bool ShowRangeDialog(out int start, out int end)
+        // Okunacak PLU araligini ve departmani soran kucuk pencere.
+        // Departman: CLI'nin --dept secenegiyle ayni anlamda (varsayilan 1);
+        // terazide PLU'lar departman 1 disinda tutuluyorsa burada degistirilir.
+        // Protokolde 2 HEX haneyle tasindigi icin (CasNetReader.Read) 1-255 ile sinirlanir.
+        private bool ShowRangeDialog(out int start, out int end, out int dept)
         {
-            start = 1; end = 100;
+            start = 1; end = 100; dept = 1;
             using (var f = new Form())
             {
                 f.Text = "Teraziden PLU Al";
                 f.FormBorderStyle = FormBorderStyle.FixedDialog;
                 f.StartPosition = FormStartPosition.CenterParent;
                 f.MinimizeBox = false; f.MaximizeBox = false;
-                f.ClientSize = new Size(280, 135);
+                f.ClientSize = new Size(280, 168);
 
                 var l1 = new Label { Text = "Baslangic PLU:", Left = 12, Top = 18, Width = 110 };
                 var t1 = new TextBox { Left = 128, Top = 15, Width = 120, Text = "1" };
                 var l2 = new Label { Text = "Bitis PLU:", Left = 12, Top = 52, Width = 110 };
                 var t2 = new TextBox { Left = 128, Top = 49, Width = 120, Text = "100" };
-                var ok = new Button { Text = "Al", Left = 128, Top = 92, Width = 58, DialogResult = DialogResult.OK };
-                var cancel = new Button { Text = "Iptal", Left = 190, Top = 92, Width = 58, DialogResult = DialogResult.Cancel };
-                f.Controls.AddRange(new Control[] { l1, t1, l2, t2, ok, cancel });
+                var l3 = new Label { Text = "Departman No:", Left = 12, Top = 86, Width = 110 };
+                var n3 = new NumericUpDown { Left = 128, Top = 83, Width = 120, Minimum = 1, Maximum = 255, Value = 1 };
+                var ok = new Button { Text = "Al", Left = 128, Top = 125, Width = 58, DialogResult = DialogResult.OK };
+                var cancel = new Button { Text = "Iptal", Left = 190, Top = 125, Width = 58, DialogResult = DialogResult.Cancel };
+                f.Controls.AddRange(new Control[] { l1, t1, l2, t2, l3, n3, ok, cancel });
                 f.AcceptButton = ok; f.CancelButton = cancel;
 
                 if (f.ShowDialog(this) != DialogResult.OK) return false;
                 int.TryParse(t1.Text.Trim(), out start);
                 int.TryParse(t2.Text.Trim(), out end);
+                dept = (int)n3.Value;
                 return true;
             }
         }
