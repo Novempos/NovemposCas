@@ -351,11 +351,37 @@ namespace CasScaleSender
             if (sheet.Rows.Count == 0) { Info("Excel'de veri satiri yok."); return; }
 
             records.Clear(); names.Clear();
-            foreach (var row in sheet.Rows)
+            var overflowErrors = new List<string>();
+            for (int i = 0; i < sheet.Rows.Count; i++)
             {
-                records.Add(PluBuilder.BuildV06(row, enc));
+                var row = sheet.Rows[i];
                 string n; row.TryGetValue("Name", out n);
-                names.Add(n ?? "");
+                try
+                {
+                    records.Add(PluBuilder.BuildV06(row, enc));
+                    names.Add(n ?? "");
+                }
+                catch (PluFieldOverflowException ex)
+                {
+                    string pluNo; row.TryGetValue("PLU No", out pluNo);
+                    overflowErrors.Add(string.Format("Kayit {0} (PLU No={1}, Ad={2}): {3}",
+                        i + 1,
+                        string.IsNullOrEmpty(pluNo) ? "?" : pluNo,
+                        string.IsNullOrEmpty(n) ? "?" : n,
+                        ex.Message));
+                }
+            }
+
+            if (overflowErrors.Count > 0)
+            {
+                log.Items.Clear();
+                Info("GONDERIM DURDURULDU: " + overflowErrors.Count + " kayitta alan tasmasi bulundu. Once Excel'i duzeltin.");
+                foreach (var e in overflowErrors) Info("  " + e);
+                int shown = Math.Min(10, overflowErrors.Count);
+                Warn("Excel'de " + overflowErrors.Count + " kayitta alan tasmasi var, hicbir PLU gonderilmedi:\r\n\r\n" +
+                     string.Join("\r\n", overflowErrors.GetRange(0, shown)) +
+                     (overflowErrors.Count > shown ? "\r\n... (tumu icin durum listesine bakin)" : ""));
+                return;
             }
 
             log.Items.Clear();

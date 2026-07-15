@@ -74,10 +74,31 @@ namespace CasScaleSender.Cli
             Encoding enc; try { enc = Encoding.GetEncoding(Get(o, "encoding", cfg.EncodingName)); } catch { enc = Encoding.ASCII; }
 
             var recs = new List<string>(); var names = new List<string>();
-            foreach (var row in rows)
+            var overflowErrors = new List<string>();
+            for (int i = 0; i < rows.Count; i++)
             {
-                recs.Add(PluBuilder.BuildV06(row, enc));
-                string n; row.TryGetValue("Name", out n); names.Add(n ?? "");
+                var row = rows[i];
+                string n; row.TryGetValue("Name", out n);
+                try
+                {
+                    recs.Add(PluBuilder.BuildV06(row, enc));
+                    names.Add(n ?? "");
+                }
+                catch (PluFieldOverflowException ex)
+                {
+                    string pluNo; row.TryGetValue("PLU No", out pluNo);
+                    overflowErrors.Add(string.Format("Kayit {0} (PLU No={1}, Ad={2}): {3}",
+                        i + 1,
+                        string.IsNullOrEmpty(pluNo) ? "?" : pluNo,
+                        string.IsNullOrEmpty(n) ? "?" : n,
+                        ex.Message));
+                }
+            }
+            if (overflowErrors.Count > 0)
+            {
+                Console.Error.WriteLine(overflowErrors.Count + " kayitta alan tasmasi bulundu, hicbir PLU gonderilmedi:");
+                foreach (var e in overflowErrors) Console.Error.WriteLine("  " + e);
+                return 2;
             }
             Console.WriteLine("Gonderiliyor: " + recs.Count + " PLU -> " + ip + ":" + port);
 
