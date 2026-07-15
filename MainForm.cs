@@ -9,10 +9,6 @@ namespace CasScaleSender
 {
     public class MainForm : Form
     {
-        private const int ACTION_DOWNLOAD = 3;   // teraziye yaz
-        private const int RECV_SUCCESS = 1001;
-        private const int RECV_FAIL = 1002;
-
         private AxCASSCALELib.AxCasScale ax;
         private AppSettings cfg;
 
@@ -28,17 +24,14 @@ namespace CasScaleSender
         private System.Threading.Thread readThread;
         private List<Dictionary<string, string>> received = new List<Dictionary<string, string>>();
 
-        // Coklu gonderim durumu
+        // Coklu gonderim durumu (asil gonderim mantigi: bkz. ScaleSendSession)
         private List<string> records = new List<string>();
         private List<string> names = new List<string>();
-        private int index;
-        private int okCount, failCount;            // aktif terazi
         private int totalOk, totalFail;            // tum teraziler
-        private string sendIp, sendVersion; private int sendPort, sendModel, sendDataType;
         private List<ScaleConfig> sendQueue = new List<ScaleConfig>();
         private int sendScaleIdx;
         private bool sending;
-        private System.Windows.Forms.Timer sendTimer;
+        private ScaleSendSession activeSend;
         private const int SEND_TIMEOUT_MS = 10000; // terazi yaniti icin bekleme suresi (10 sn)
 
         public MainForm()
@@ -117,10 +110,7 @@ namespace CasScaleSender
             log = new ListBox { Left = x1, Top = y, Width = ClientSize.Width - 24, Height = ClientSize.Height - y - 12, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
             Add(log);
 
-            sendTimer = new System.Windows.Forms.Timer { Interval = SEND_TIMEOUT_MS };
-            sendTimer.Tick += (s, e) => OnSendTimeout();
-
-            FormClosing += (s, e) => { StopSendTimer(); SaveCfgFromUi(); TryDisconnect(sendIp); };
+            FormClosing += (s, e) => { if (activeSend != null) activeSend.Cancel(); SaveCfgFromUi(); };
         }
 
         private Button ScaleBtn(string t, int x, int y, int w)
@@ -395,53 +385,26 @@ namespace CasScaleSender
             SendToScale(0);
         }
 
-        // Sirasidaki teraziye baglanip tum PLU'lari gonderir.
+        // Sirasidaki teraziye baglanip tum PLU'lari gonderir. Asil gonderim
+        // dongusu (baglan/gonder/bekle/zaman asimi) ScaleSendSession'da yasar
+        // (GUI ve CLI/ScaleHost ortak kullanir); burada yalnizca kuyruk
+        // yonetimi ve UI loglari var.
         private void SendToScale(int idx)
         {
             var sc = sendQueue[idx];
-            sendIp = sc.Ip; sendPort = sc.Port; sendModel = sc.Model; sendDataType = sc.DataType; sendVersion = sc.Version;
-            index = 0; okCount = 0; failCount = 0;
-
             Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
-            int rtnC = ax.ConnectionEx3(sendIp, sendPort, -1, sendModel, sendVersion, 97);
-            Info("  Baglaniliyor... ret=" + rtnC);
-            if (rtnC <= 0)
-            {
-                Info("  Baglanti kurulamadi, bu terazi atlandi.");
-                totalFail += records.Count;
-                AdvanceScale();
-                return;
-            }
-            SendNext();
+
+            activeSend = new ScaleSendSession(ax, Info);
+            activeSend.Completed += OnScaleSendCompleted;
+            activeSend.Start(sc.Ip, sc.Port, sc.Model, sc.Version, sc.DataType, records, names, SEND_TIMEOUT_MS);
         }
 
-        // Siradaki PLU'yu gonderir; terazi cevabini Ax_RecvEventString bekler.
-        private void SendNext()
+        // Aktif terazi bitti (kayitlar tukendi VEYA zaman asimiyla durduruldu)
+        // -> toplamlara ekle, sonrakine gec.
+        private void OnScaleSendCompleted()
         {
-            while (index < records.Count)
-            {
-                int i = index;
-                int rtn = ax.SendDataString(sendIp, -1, sendModel, sendVersion, ACTION_DOWNLOAD, sendDataType, records[i]);
-                if (rtn > 0)
-                {
-                    RestartSendTimer();
-                    Info(string.Format("  #{0} '{1}' gonderildi, yanit bekleniyor...", i + 1, names[i]));
-                    return;
-                }
-                failCount++;
-                Info(string.Format("  #{0} '{1}' KUYRUGA ALINAMADI (ret={2})", i + 1, names[i], rtn));
-                index++;
-            }
-            ScaleDone();
-        }
-
-        // Aktif terazi bitti -> toplamlara ekle, baglantiyi kapat, sonrakine gec.
-        private void ScaleDone()
-        {
-            StopSendTimer();
-            Info(string.Format("  Bitti. Basarili: {0}, Basarisiz: {1}", okCount, failCount));
-            totalOk += okCount; totalFail += failCount;
-            TryDisconnect(sendIp);
+            totalOk += activeSend.OkCount; totalFail += activeSend.FailCount;
+            Info(string.Format("  Bitti. Basarili: {0}, Basarisiz: {1}", activeSend.OkCount, activeSend.FailCount));
             AdvanceScale();
         }
 
@@ -466,17 +429,8 @@ namespace CasScaleSender
         private void Ax_RecvEventString(object sender, AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
         {
             // Okuma artik OCX olay'i degil, dogrudan TCP (CasNetReader) ile yapilir.
-            if (!sending || e.iTransType != ACTION_DOWNLOAD) return;
-
-            if (e.iResult == RECV_SUCCESS) { StopSendTimer(); okCount++; Info(string.Format("  -> #{0} '{1}' OK", index + 1, PluName(index))); }
-            else if (e.iResult == RECV_FAIL) { StopSendTimer(); failCount++; Info(string.Format("  -> #{0} '{1}' BASARISIZ", index + 1, PluName(index))); }
-            else return;
-
-            index++;
-            SendNext();
+            if (activeSend != null) activeSend.HandleRecv(e.iTransType, e.iResult);
         }
-
-        private string PluName(int i) { return (i >= 0 && i < names.Count) ? names[i] : ""; }
 
         private void SetBusy(bool busy)
         {
@@ -500,30 +454,10 @@ namespace CasScaleSender
                 Info("Iptal ediliyor...");
                 return;
             }
-            StopSendTimer();
             sending = false;
-            TryDisconnect(sendIp);
+            if (activeSend != null) activeSend.Cancel();
             SetBusy(false);
             Info("Gonderim iptal edildi.");
-        }
-
-        // ---- zaman asimi ----
-
-        private void RestartSendTimer() { sendTimer.Stop(); sendTimer.Start(); }
-        private void StopSendTimer() { if (sendTimer != null) sendTimer.Stop(); }
-
-        // 10 sn icinde terazi yaniti gelmezse: bu terazide durdur, sonrakine gec.
-        private void OnSendTimeout()
-        {
-            StopSendTimer();
-            if (!sending) return;
-            failCount++;
-            Info(string.Format("  -> #{0} '{1}' ZAMAN ASIMI ({2} sn yanit yok)",
-                index + 1, PluName(index), SEND_TIMEOUT_MS / 1000));
-            Info("  Bu terazide gonderim durduruldu, sonraki teraziye geciliyor.");
-            totalOk += okCount; totalFail += failCount;
-            TryDisconnect(sendIp);
-            AdvanceScale();
         }
 
         // ---- teraziden okuma (AL) — TEK terazi ----
@@ -630,12 +564,6 @@ namespace CasScaleSender
         }
 
         // ---- yardimcilar ----
-
-        private void TryDisconnect(string ip)
-        {
-            if (string.IsNullOrWhiteSpace(ip)) return;
-            try { if (ax != null) ax.DisconnectOneEx(ip, -1); } catch { }
-        }
 
         private void SaveCfgFromUi()
         {

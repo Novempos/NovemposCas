@@ -56,6 +56,7 @@
     <Compile Include="..\PluReader.cs"><Link>shared\PluReader.cs</Link></Compile>
     <Compile Include="..\CasNetReader.cs"><Link>shared\CasNetReader.cs</Link></Compile>
     <Compile Include="..\ScaleConfig.cs"><Link>shared\ScaleConfig.cs</Link></Compile>
+    <Compile Include="..\ScaleSendSession.cs"><Link>shared\ScaleSendSession.cs</Link></Compile>
     <Compile Include="..\XlsxWriter.cs"><Link>shared\XlsxWriter.cs</Link></Compile>
     <Compile Include="..\PluListPrinter.cs"><Link>shared\PluListPrinter.cs</Link></Compile>
     <Compile Include="..\AppSettings.cs"><Link>shared\AppSettings.cs</Link></Compile>
