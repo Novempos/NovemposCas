@@ -26,6 +26,9 @@ namespace CasScaleSender
         // Coklu gonderim durumu (asil gonderim mantigi: bkz. ScaleSendSession)
         private List<string> records = new List<string>();
         private List<string> names = new List<string>();
+        // Tam degistir: Excel'deki (menudeki) PLU no'lar. Gonderimden ONCE teraziden
+        // bunlarin DISINDAKI eski PLU'lar silinir (eski/cop kalinti — "0101..." vb.).
+        private HashSet<int> menuPlus = new HashSet<int>();
         private int totalOk, totalFail;            // tum teraziler
         private List<ScaleConfig> sendQueue = new List<ScaleConfig>();
         private int sendScaleIdx;
@@ -363,6 +366,14 @@ namespace CasScaleSender
                 }
             }
 
+            // Tam degistir icin menu PLU no kumesi (silinecekleri bunun disindan bul).
+            menuPlus.Clear();
+            foreach (var row in sheet.Rows)
+            {
+                string p;
+                if (row.TryGetValue("PLU No", out p)) { int v = DigitsToInt(p); if (v > 0) menuPlus.Add(v); }
+            }
+
             if (overflowErrors.Count > 0)
             {
                 log.Items.Clear();
@@ -395,8 +406,48 @@ namespace CasScaleSender
         private void SendToScale(int idx)
         {
             var sc = sendQueue[idx];
-            Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
+            Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) — tam degistir ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
 
+            // Tam degistir: menude (Excel'de) OLMAYAN eski PLU'lari sil, sonra menuyu
+            // yaz. Boylece eski/cop kalinti (isim onunde "0101..." vb.) temizlenir.
+            // Once ARKA PLANDA temizle (CasNetReader.Read/DeletePlus bloklar; UI donmasin
+            // — AL ile ayni desen), bitince UI thread'inde asenkron OCX gonderimini baslat.
+            Action<string> logCb = s => { try { BeginInvoke((Action)(() => Info(s))); } catch { } };
+            var t = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    logCb("  Eski PLU'lar taraniyor (tam degistir)...");
+                    var existing = CasNetReader.Read(sc.Ip, sc.Port, 1, 9999, 1, 8000, logCb, () => !sending);
+                    var stale = new List<int>();
+                    foreach (var row in existing)
+                    {
+                        string p;
+                        if (row.TryGetValue("PLU No", out p))
+                        {
+                            int v = DigitsToInt(p);
+                            if (v > 0 && !menuPlus.Contains(v)) stale.Add(v);
+                        }
+                    }
+                    if (stale.Count > 0)
+                    {
+                        logCb("  " + stale.Count + " eski/fazla PLU siliniyor...");
+                        CasNetReader.DeletePlus(sc.Ip, sc.Port, 1, stale, 8000, logCb, () => !sending);
+                    }
+                    else logCb("  Temizlenecek eski PLU yok.");
+                }
+                catch (Exception ex) { logCb("  Temizleme atlandi: " + ex.Message); }
+                try { BeginInvoke((Action)(() => StartSendSession(idx))); } catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
+        }
+
+        // Temizlik bittikten sonra UI thread'inde asenkron OCX gonderimini baslatir.
+        private void StartSendSession(int idx)
+        {
+            if (!sending) { SetBusy(false); return; } // iptal edilmis
+            var sc = sendQueue[idx];
             activeSend = new ScaleSendSession(ax, Info);
             activeSend.Completed += OnScaleSendCompleted;
             activeSend.Start(sc.Ip, sc.Port, sc.Model, sc.Version, sc.DataType, records, names, SEND_TIMEOUT_MS);
