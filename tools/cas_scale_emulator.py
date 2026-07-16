@@ -21,12 +21,32 @@ Kullanım:
     → App/CLI terazi IP'sini 127.0.0.1:20304 yap; web görünüm http://127.0.0.1:8081
 """
 import argparse
+import datetime
+import random
 import socket
 import socketserver
-import struct
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Son kullanma tarihi (F=10, 4B LE) kodlaması: 2000-01-01'den itibaren gün
+# sayısı hipotezi (DATAOPTION MAX=9999 → ~2027'ye denk gelir). CLWorks yanlış
+# tarih gosterirse buradaki EPOCH/format degistirilir.
+_DATE_EPOCH = datetime.date(2000, 1, 1)
+
+
+def _random_sellby():
+    """Rastgele gerçek bir son-kullanma tarihi → (F=10 gün-değeri, gösterim str)."""
+    d = datetime.date.today() + datetime.timedelta(days=random.randint(1, 45))
+    return ((d - _DATE_EPOCH).days, d.strftime("%d.%m.%Y"))
+
+
+def _sellby_str(val):
+    """F=10 gün-değerini okunur tarihe çevir (web görünüm)."""
+    try:
+        return (_DATE_EPOCH + datetime.timedelta(days=int(val))).strftime("%d.%m.%Y")
+    except (ValueError, OverflowError):
+        return "-"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -64,6 +84,7 @@ def build_read_response(plu, rec):
     body += _field(0x04, 0x4D, _le(rec["type"], 1))
     body += _field(0x06, 0x4C, _le(rec["price"], 4))
     body += _field(0x0B, 0x4C, _le(rec["itemcode"], 4))
+    body += _field(0x10, 0x4C, _le(rec.get("sellby", 0), 4))  # Son kullanma (gün)
     name_b = rec["name"].encode(ENC, "replace")
     body += _field(0x0A, 0x53, name_b)
     return _frame("01", plu, body)
@@ -197,8 +218,11 @@ def handle_write(frame, conn_ip, conn_port):
     ptype = f.get(0x04, b"\x01")[0] if f.get(0x04) else 1
     name = f.get(0x0A, b"").decode(ENC, "replace").rstrip("\x00 ")
     with _LOCK:
+        prev = _PLU.get((dept, plu))
+        # Son kullanma tarihini stabil tut (varsa koru, yoksa rastgele ata).
+        sellby = prev["sellby"] if prev else _random_sellby()[0]
         _PLU[(dept, plu)] = {"name": name, "price": price, "type": ptype,
-                             "itemcode": itemcode, "dept": dept}
+                             "itemcode": itemcode, "dept": dept, "sellby": sellby}
     _log("  YAZ  PLU %d = '%s' fiyat=%d urunkodu=%d" % (plu, name, price, itemcode))
     return _write_ack(kayit, conn_ip, conn_port)
 
@@ -281,13 +305,14 @@ class _Web(BaseHTTPRequestHandler):
                      "<b>127.0.0.1:20304</b> yapıp <b>GÖNDER</b> deyin.</div>")
         else:
             html += ("<table><tr><th>Dept</th><th>PLU No</th><th>Ürün Kodu</th>"
-                     "<th>Ad</th><th>Fiyat</th><th>Tip</th></tr>")
+                     "<th>Ad</th><th>Fiyat</th><th>Tip</th><th>Son Kullanma</th></tr>")
             for (dept, plu), r in rows:
                 html += ("<tr><td class=n>%d</td><td class=n>%d</td><td class=n>%d</td>"
-                         "<td>%s</td><td class=n>%.2f</td><td class=n>%s</td></tr>"
+                         "<td>%s</td><td class=n>%.2f</td><td class=n>%s</td><td class=n>%s</td></tr>"
                          % (dept, plu, r["itemcode"],
                             _esc(r["name"]), r["price"] / 100.0,
-                            "tartılı" if r["type"] == 1 else "adet"))
+                            "tartılı" if r["type"] == 1 else "adet",
+                            _sellby_str(r.get("sellby", 0))))
             html += "</table>"
         html += "</body></html>"
         body = html.encode("utf-8")
@@ -313,7 +338,7 @@ def main():
 
     for i in range(1, args.seed + 1):
         _PLU[(1, i)] = {"name": "Ornek %d" % i, "price": i * 100, "type": 1,
-                        "itemcode": i, "dept": 1}
+                        "itemcode": i, "dept": 1, "sellby": _random_sellby()[0]}
 
     scale = _Server((args.host, args.port), _Handler)
     web = ThreadingHTTPServer((args.host, args.http), _Web)
