@@ -49,14 +49,20 @@ namespace CasScaleSender
                 return def;
             };
 
+            // CLWorks referans gonderiminde ItemCode (urun kodu; wire'da W02A alan 0B,
+            // 4B LE) = PLU No olarak yaziliyor. Biz burayi bos/"0" birakinca terazide
+            // urun kodu bos kaliyor (barkod/lookup dogru calismiyordu). ItemCode veri
+            // sutununda ACIKCA verilmediyse PLU No'ya varsayilan yap — CLWorks ile birebir.
+            string pluNo = C("PLU No", "1");
+
             var sb = new StringBuilder();
             sb.Append(Num(C("Department No", "1"), 4, "Department No"));   // Departman No
-            sb.Append(Num(C("PLU No", "1"), 6, "PLU No"));                 // PLU No
+            sb.Append(Num(pluNo, 6, "PLU No"));                           // PLU No
             sb.Append(Num(C("PLU Type", "1"), 2, "PLU Type"));             // PLU tipi (1=tartili, 2=adet)
             sb.Append(Num(C("Unit Weight", "1"), 2, "Unit Weight"));       // Birim agirlik
             sb.Append(Num(C("Price", "0"), 10, "Price"));                  // Birim fiyat (tam sayi, orn 55.00 -> 5500)
             sb.Append(Num(C("Group No", "1"), 4, "Group No"));             // Grup No
-            sb.Append(Num(C("ItemCode", "0"), 13, "ItemCode"));            // Urun kodu
+            sb.Append(Num(C("ItemCode", pluNo), 13, "ItemCode"));         // Urun kodu = PLU No (bos ise)
             sb.Append(Num("0", 4, "Tare No"));                             // Tare No
             sb.Append(Num("0", 10, "Tare"));                               // Tare
             sb.Append(Num(C("Pieces", "1"), 6, "Pieces"));                 // Adet

@@ -17,7 +17,7 @@ namespace CasScaleSender
     //     Govde:  meta ( ^=.. .*=.. .N=.... ) + alanlar
     //       Alan: "F=" + kod(2 HEX) + "." + tip(2 HEX) + "," + uzunluk(2 HEX) + ":" + <uzunluk byte deger>
     //       Ilgili kodlar:  01=Departman(2B LE)  02=PLU No(4B LE)  04=PLU Tipi(1B)
-    //                       06=Fiyat(4B LE)       0A=Isim(windows-1254)
+    //                       06=Fiyat(4B LE)       0A=Isim(windows-1254)  0B=Urun Kodu(4B LE)
     public static class CasNetReader
     {
         // Teraziye TCP baglanti testi (ekleme/duzenleme diyalogundaki "Test" butonu).
@@ -94,6 +94,76 @@ namespace CasScaleSender
             return result;
         }
 
+        // ── SILME (direct TCP; OCX DeleteAllPLU/DeletePLU wire'a hicbir sey
+        // gondermiyordu, o yuzden CL-Works'un ham komutunu proxy ile yakalayip
+        // birebir replicate ediyoruz — okuma R02F ile ayni mantik) ──
+        //
+        //   Istek (16 byte):  "C43F13," + dept(2 HEX) + plu(6 HEX) + "\n"
+        //                     orn. PLU 66 (0x42), dept 1:  C43F13,01000042\n
+        //   Cevap:            "C003:O.." = basarili (O = OK). Yok olan PLU'da da
+        //                     genelde O doner (blind-delete guvenli).
+        //
+        // NOT: CL-Works'te "tumunu sec + sil" bile tek tek bu komutu gonderiyor —
+        // toplu silme komutu yok. Biz de PLU listesini tek tek sileriz.
+
+        // Tek TCP baglanti uzerinden verilen PLU listesini tek tek siler.
+        // Doner: [silinen, basarisiz]. Baglanti kurulamazsa [0, -1].
+        public static int[] DeletePlus(
+            string ip, int port, int dept, IEnumerable<int> plus, int timeoutMs,
+            Action<string> log, Func<bool> cancelled = null)
+        {
+            log = log ?? (s => { });
+            int ok = 0, fail = 0;
+            using (var cli = new TcpClient())
+            {
+                if (!cli.ConnectAsync(ip, port).Wait(timeoutMs))
+                {
+                    log("Baglanti kurulamadi (zaman asimi). IP/port ve agi kontrol edin.");
+                    return new[] { 0, -1 };
+                }
+                cli.NoDelay = true;
+                var st = cli.GetStream();
+                st.ReadTimeout = timeoutMs;
+                foreach (int plu in plus)
+                {
+                    if (cancelled != null && cancelled()) { log("Islem iptal edildi."); break; }
+                    try
+                    {
+                        if (DeleteOne(st, dept, plu)) { ok++; log("  PLU " + plu + " silindi."); }
+                        else { fail++; log("  PLU " + plu + " SILINEMEDI."); }
+                    }
+                    catch (Exception ex) { fail++; log("  PLU " + plu + " hata: " + ex.Message); }
+                }
+            }
+            return new[] { ok, fail };
+        }
+
+        private static bool DeleteOne(NetworkStream st, int dept, int plu)
+        {
+            string req = "C43F13," + Hex(dept, 2) + Hex(plu, 6) + "\n";
+            byte[] rb = Encoding.ASCII.GetBytes(req);
+            st.Write(rb, 0, rb.Length);
+            string resp = ReadLine(st);   // "C003:O13\n"
+            return resp != null && resp.IndexOf(":O", StringComparison.Ordinal) >= 0;
+        }
+
+        // Kucuk ASCII cevabi ilk LF'e kadar okur (silme cevabi: "C003:O13\n\n").
+        private static string ReadLine(NetworkStream st)
+        {
+            var sb = new StringBuilder(16);
+            var one = new byte[1];
+            while (true)
+            {
+                int r;
+                try { r = st.Read(one, 0, 1); }
+                catch { break; }
+                if (r <= 0) break;
+                if (one[0] == (byte)'\n') { if (sb.Length > 0) break; else continue; }
+                sb.Append((char)one[0]);
+            }
+            return sb.Length > 0 ? sb.ToString() : null;
+        }
+
         // 18 byte header + (L) govde + 1 checksum = tam bir cevap cerçevesi.
         private static byte[] ReadFrame(NetworkStream st)
         {
@@ -150,6 +220,10 @@ namespace CasScaleSender
                     case 0x02: d["PLU No"] = LeInt(msg, valStart, len).ToString(); break;
                     case 0x04: d["PLU Type"] = LeInt(msg, valStart, len).ToString(); break;
                     case 0x06: d["Price"] = LeInt(msg, valStart, len).ToString(); break;
+                    // 0B = Urun Kodu (ItemCode, 4B LE). Yazma tarafinda PLU No'ya
+                    // esitleniyor; AL'da da okunmali (PluReader.Columns'da kolon var
+                    // ama parse edilmedigi icin Excel'de bos kaliyordu).
+                    case 0x0B: d["ItemCode"] = LeInt(msg, valStart, len).ToString(); break;
                     case 0x0A: d["Name"] = enc.GetString(msg, valStart, len).TrimEnd('\0', ' ').Trim(); break;
                 }
                 i = valStart + len; // sonraki alan hemen ardindan gelir (ayrac yok)
