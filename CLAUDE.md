@@ -49,6 +49,9 @@ msbuild CasScaleSender.sln /p:Configuration=Release /p:Platform=x86
 - No API/network connection to other NovemPOS repos. Integration is process-level: the NovemPOS Flutter POS invokes `novempos-cli send/receive/print --json <file>`. The CLI flags, the JSON row schema (`JsonPluIo.cs`: array of objects keyed like `PluReader.Columns`) and the exit codes are the public contract.
 - Hardware: CAS CL3000/CL5000 scales over TCP, default port 20304.
 
+**Cross-repo impact — if you change this here, check there:**
+- The CLI public contract (flags of `novempos-cli send/receive/print --json`, the JSON row schema, exit codes 0–4) is consumed by kasapos-terminal-v2 (external, not on this machine — the "Flutter POS" referred to above) — any change needs coordination there; novempos-backend is unaffected.
+
 ## Working style
 
 **Think before coding.** State assumptions. If the prompt has multiple interpretations, surface them. Push back on overcomplication.
