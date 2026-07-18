@@ -26,6 +26,12 @@ msbuild CasScaleSender.sln /p:Configuration=Release /p:Platform=x86
 - CLI smoke test: `cli\bin\Release\novempos-cli.exe help`
 - No test or lint tooling exists.
 
+## Test
+
+- No physical CAS scale needed: run the TCP emulator, `python tools/cas_scale_emulator.py [--port 20304 --http 8081]`.
+- Point the app/CLI's scale IP at `127.0.0.1:20304`; the emulator's live PLU store is viewable at `http://127.0.0.1:8081`.
+- Supported protocol: R02F read / W02A OCX write + ACK / C43F13 delete — GONDER/AL/SIL and full-replace flows are tested against it.
+
 ## Code conventions (observed)
 
 - **Row contract:** all PLU data flows as `List<Dictionary<string,string>>` with `StringComparer.OrdinalIgnoreCase` keys named after the Excel headers (`"PLU No"`, `"Name"`, `"Price"`, ... — full list in `PluReader.Columns`). Excel, JSON, scale-read and print paths all share this shape (see `docs/CODE_REFERENCES.md`).
