@@ -1,13 +1,25 @@
 ========================================================================
   NOVEMPOS - TERAZI PLU GONDERICI  (CAS CL3000 / CL5000 - CL-Works'e gerek yok)
+  Surum: 1.7.0
 ========================================================================
 
 NE YAPAR
 --------
-Bir Excel (.xlsx) dosyasindaki PLU listesini secip, terazinin IP:PORT
-adresine dogrudan gonderir. Resmi CAS OCX bileşenini (CasScale.ocx)
-kullanir; byte protokolü ile ugrasmaz. IP ve Port bir sonraki acilista
-hatirlanir (ayarlar.txt) ama istediginiz zaman degistirebilirsiniz.
+Bir Excel (.xlsx) veya JSON dosyasindaki PLU listesini secip, terazinin
+IP:PORT adresine dogrudan gonderir (GONDER). Gonderim resmi CAS OCX
+bileşenini (CasScale.ocx) kullanir; byte protokolü ile ugrasmaz. Teraziden
+PLU okuma (AL) ise OCX'e ihtiyac duymadan, dogrudan ag baglantisiyla
+calisir. Ayrica Excel'deki PLU listesini 80mm fis yazicisina basabilir.
+
+En fazla 10 terazi tanimlanabilir; GONDER icin listeden birden fazlasi,
+AL icin ise yalnizca TEK terazi isaretlenir. Tanimli teraziler bir sonraki
+acilista hatirlanir (ayarlar.txt) ama istediginiz zaman Ekle/Duzenle/Sil
+ile degistirebilirsiniz.
+
+Gonderim oncesi her PLU alani, terazi protokolunun sabit hane sinirina
+sigdirilmaya calisilir. Sigmayan bir deger varsa (orn. cok haneli bir PLU
+No) o kayit ARTIK SESSIZCE KIRPILMAZ: islem hicbir PLU gondermeden durur
+ve hangi kayitta/alanda tasma oldugu durum listesinde gosterilir.
 
 
 KURULUM (onerilen - son kullanici)
@@ -24,12 +36,21 @@ KURULUM (onerilen - son kullanici)
 HIZLI BASLANGIC (kullanim)
 --------------------------
 1) Programi acin (Baslat menusu > Novempos, veya masaustu kisayolu).
-2) GONDER : "Sec..." ile Excel'i secip Terazi IP/Port yazin, GONDER'e basin.
-   Alt penceredeki "Durum" listesinde her satirin sonucunu gorursunuz.
-3) AL     : Teraziden PLU okur. IP/Port yazin, AL'a basin, PLU araligini
-   girin (orn 1-100). Bulunan PLU'lar import ile ayni formatta bir .xlsx
-   dosyasina kaydedilir (nereye kaydedilecegi sorulur).
-4) PLU Listesi Yazdir (80mm) : Secili Excel'deki PLU + urun adlarini 80mm
+2) Terazi tanimlayin: "Terazi Ekle" ile Ad/IP/Port/Model/PLU veri tipini
+   girin ("Baglantiyi Test Et" ile dogrulayabilirsiniz). "Duzenle"/"Sil" ile
+   sonradan degistirebilir/kaldirabilirsiniz. Tek terazi tanimliysa program
+   acilista onu otomatik isaretler.
+3) GONDER : "Sec..." ile Excel'i secip, listeden gonderilecek terazi(leri)
+   isaretleyin (birden fazla secilebilir), GONDER'e basin. Alt penceredeki
+   "Durum" listesinde her terazinin/satirin sonucunu gorursunuz. Bir PLU
+   alani hane sinirini asarsa hicbir kayit gonderilmez; hatali kayitlar
+   durum listesinde gosterilir, Excel'i duzeltip tekrar deneyin.
+4) AL     : Teraziden PLU okur. Listeden YALNIZCA TEK terazi isaretleyip
+   AL'a basin; acilan pencerede PLU araligini (orn 1-100) VE departman
+   numarasini girin (varsayilan 1 - terazide PLU'lar baska bir departmanda
+   tutuluyorsa buradan degistirin). Bulunan PLU'lar import ile ayni
+   formatta bir .xlsx dosyasina kaydedilir (nereye kaydedilecegi sorulur).
+5) PLU Listesi Yazdir (80mm) : Secili Excel'deki PLU + urun adlarini 80mm
    fis yazicisina basar. "Sona bos satir" kutusuna sayi girerseniz, listenin
    sonuna son PLU'dan devam eden o kadar bos (elle doldurulacak) satir ekler.
 
@@ -44,20 +65,28 @@ kendi komut isteminizde uygulama klasorune girip novempos-cli calistirin.
     novempos-cli receive  --out <dosya.xlsx>     -> teraziden PLU oku, kaydet
     novempos-cli print    --excel <dosya.xlsx>   -> 80mm yaziciya liste bas
     novempos-cli help                            -> tum parametreler
+    novempos-cli version                         -> surum numarasini gosterir
 
   ORTAK (terazi):  --ip <ip>  --port <n>  --model <n>  --datatype <n>
                    --encoding <ad>  --timeout <sn>
-     (Verilmezse GUI'nin kaydettigi ayarlar kullanilir.)
+     (Verilmezse GUI'nin kaydettigi ayarlar.txt'ten okunur.)
 
-  send    : --excel <dosya>   (zorunlu)
-  receive : --out <dosya>      (zorunlu)   --from <n>  --to <n>  --dept <n>
-  print   : --excel <dosya>    (zorunlu)   --printer <ad>  --blank <n>  --font <punto>
+  send    : --excel <dosya>  VEYA  --json <dosya>   (biri zorunlu; --json
+            POS entegrasyonu icin bir PLU nesne dizisi bekler)
+  receive : --out <dosya>  VE/VEYA  --json <dosya>  (en az biri zorunlu;
+            ikisi de verilirse hem .xlsx hem .json yazilir)
+            --from <n>  --to <n>  --dept <n>  (varsayilan: 1, 100, 1)
+  print   : --excel <dosya>  VEYA  --json <dosya>   (biri zorunlu)
+            --printer <ad>  --blank <n>  --font <punto>
 
   ORNEKLER:
     novempos-cli send --excel C:\plu\liste.xlsx --ip 192.168.1.1
-    novempos-cli receive --out C:\plu\terazi.xlsx --from 1 --to 500
+    novempos-cli send --json C:\plu\liste.json --ip 192.168.1.1
+    novempos-cli receive --out C:\plu\terazi.xlsx --from 1 --to 500 --dept 2
     novempos-cli print --excel C:\plu\liste.xlsx --printer "XP-80C" --blank 10
 
+  * Bir PLU alani hane sinirini asarsa send/print hicbir kayit
+    gondermez/basmaz; hatali kayitlar ekrana yazilir (send'de cikis kodu 2).
   * Islemi kesmek icin Ctrl+C. Cikis kodu 0 = basarili.
   * Ayrintili yardim: novempos-cli help
 
@@ -86,30 +115,53 @@ Ilk satir baslik olmali. Su kolon adlari kullanilir (fazlasi/eksigi olabilir):
 - PLU Type: 1 = tartili, 2 = adet.
 - Price (Fiyat): terazinin TAM SAYI birimindedir. Ornek 55,00 TL -> 5500
   yazin. ("55.00" yazarsaniz da 5500 olarak yorumlanir.)
+- Sayisal alanlarin (PLU No, Department No, Price, ...) protokolde sabit
+  bir hane siniri vardir (orn. PLU No en fazla 6 hane). Siniri asan bir
+  deger varsa (yanlis kolona yapismis barkod, baska sistemden aktarilmis
+  uzun kod vb.) GONDER hicbir PLU gondermeden durur; hangi kayitta/alanda
+  tasma oldugu durum listesinde (CLI'de ekranda) gosterilir.
 
 
 AYARLAR (kalici, elle de duzenlenebilir)
 -----------------------------------------
 Ayarlar su dosyada tutulur:  %APPDATA%\Novempos\ayarlar.txt
 (Adres cubuguna %APPDATA%\Novempos yazarak ulasabilirsiniz.)
-  ip=192.168.1.1
-  port=20304
-  model=5000          -> CL5000 ailesi (CL3000 protokol uyumlu)
-  pludatatype=98      -> PLU V06  (gerekirse 97=V05, 9=V02 deneyin)
-  encoding=windows-1254  -> Turkce karakter kod sayfasi
+
+Tanimli teraziler (GUI'deki "Terazi Ekle/Duzenle/Sil" listesi) scaleN.*
+satirlariyla saklanir (N = 0, 1, 2, ... en fazla 10 terazi):
+  scale0.name=Terazi 1
+  scale0.ip=192.168.1.1
+  scale0.port=20304
+  scale0.model=5000        -> CL5000 ailesi (CL3000 protokol uyumlu)
+  scale0.datatype=98       -> PLU V06  (gerekirse 97=V05, 9=V02 deneyin)
+
+Diger alanlar terazi listesinden bagimsizdir (CLI'ye terazi secenegi
+verilmezse ilk teraziyle senkron tutulan bu degerlerden okunur):
+  encoding=windows-1254    -> Turkce karakter kod sayfasi
+  lastexcel=...            -> GUI'de son secilen Excel dosyasi
+  printer=...              -> son kullanilan yazici adi
+  blankrows=0              -> yazdirmada sona eklenen bos satir sayisi
 
 
 ONEMLI NOTLAR / SORUN GIDERME
 -----------------------------
 * "OCX yuklenemedi" hatasi -> register.bat'i YONETICI olarak calistirmadiniz.
+  (Bu hata yalnizca GONDER'i etkiler; AL, OCX olmadan da calisir.)
 * Program 32-bit'tir (OCX 32-bit oldugu icin zorunlu). Kaynaktan derlerken
   Platform = x86 olmali.
-* Once 1-2 satirlik kucuk bir Excel ile deneyin (elinizdeki osmanabi.xlsx
-  2 satir - ideal). Terazide PLU'lari kontrol edip sonra tum listeyi basin.
+* Once 1-2 satirlik kucuk bir Excel ile deneyin (proje klasorundeki
+  ornek_plu.xlsx - 2 satir - ideal). Terazide PLU'lari kontrol edip sonra
+  tum listeyi basin.
 * Terazi hic yanit vermiyorsa:
     - IP/Port dogru mu? (terazi menusunden agi statik IP yapin, port 20304)
     - Ayni agda misiniz, ping atiyor mu?
     - model / pludatatype degerlerini yukaridaki alternatiflerle deneyin.
+* AL'da "Bulunan PLU: 0" donerse: once PLU araligini, sonra departman
+  numarasini kontrol edin - PLU'lar terazide departman 1 disinda
+  tanimliysa AL penceresindeki "Departman No" kutusunu buna gore degistirin.
+* "GONDERIM DURDURULDU: ... alan tasmasi" uyarisi alirsaniz, belirtilen
+  kayit(lar)daki alan (orn. PLU No) izin verilen hane sayisini asiyor
+  demektir; Excel'i (veya JSON'u) duzeltmeden hicbir PLU gonderilmez.
 * "Label No" bos ise 1 kullanilir; bu etiket formati terazide tanimli olmali,
   yoksa PLU gider ama etiket basiminda sorun cikabilir.
 * Turkce karakter (c,s,g,i,o,u) gorunumu terazinin font/kod sayfasina baglidir.
@@ -117,13 +169,20 @@ ONEMLI NOTLAR / SORUN GIDERME
 
 DOSYALAR
 --------
-  CasScaleSender.sln / .csproj  -> proje
-  Program.cs                    -> giris noktasi
-  MainForm.cs                   -> arayuz + gonderme mantigi
-  ExcelReader.cs                -> .xlsx okuyucu (harici kutuphane yok)
-  PluBuilder.cs                 -> Excel satirini V06 PLU kaydina cevirir
-  AppSettings.cs                -> ayarlar.txt oku/yaz
-  libs\                         -> CAS interop assembly'leri
-  runtime\                      -> CasScale.ocx + CAS DLL'leri + register.bat
-  bin\Release\                  -> derlenmis hazir program
+  CasScaleSender.sln             -> hem GUI hem CLI projesini icerir
+  CasScaleSender.csproj          -> GUI (NovemposTerazi.exe) projesi
+  Program.cs / MainForm.cs       -> GUI giris noktasi + arayuz/gonderme mantigi
+  ScaleConfig.cs / ScaleEditForm.cs -> terazi listesi (Ekle/Duzenle/Sil) + diyalog
+  cli\NovemposCli.csproj         -> Terminal (novempos-cli.exe) projesi
+  cli\Program.cs / ScaleHost.cs  -> CLI giris noktasi + gonderme mantigi
+  CasNetReader.cs                 -> AL: teraziden dogrudan TCP ile PLU okuma
+  ExcelReader.cs / XlsxWriter.cs  -> .xlsx oku/yaz (harici kutuphane yok)
+  JsonPluIo.cs                    -> --json oku/yaz (POS entegrasyonu)
+  PluBuilder.cs / PluReader.cs    -> PLU kaydi <-> V06 protokolu donusumu
+  PluListPrinter.cs               -> 80mm fis yazicisina PLU listesi basimi
+  AppSettings.cs                  -> ayarlar.txt oku/yaz
+  installer\installer.iss         -> Inno Setup kurulum sihirbazi
+  libs\                           -> CAS interop assembly'leri
+  runtime\                        -> CasScale.ocx + CAS DLL'leri + register.bat
+  bin\Release\ / cli\bin\Release\ -> derlenmis hazir program (GUI / CLI)
 ========================================================================

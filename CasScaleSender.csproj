@@ -34,7 +34,6 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -59,6 +58,7 @@
     <Compile Include="PluReader.cs" />
     <Compile Include="CasNetReader.cs" />
     <Compile Include="ScaleConfig.cs" />
+    <Compile Include="ScaleSendSession.cs" />
     <Compile Include="ScaleEditForm.cs" />
     <Compile Include="XlsxWriter.cs" />
     <Compile Include="PluListPrinter.cs" />

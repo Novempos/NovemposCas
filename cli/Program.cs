@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Drawing.Printing;
 using System.IO;
 using System.Text;
 
@@ -32,6 +31,7 @@ namespace CasScaleSender.Cli
                 case "send": case "gonder": return DoSend(o, cfg);
                 case "receive": case "al": case "read": return DoReceive(o, cfg);
                 case "print": case "yazdir": return DoPrint(o, cfg);
+                case "deleteall": case "silhepsi": return DoDeleteAll(o, cfg);
                 default:
                     Console.Error.WriteLine("Bilinmeyen komut: " + cmd + "  ('novempos-cli help' yazin)");
                     return 1;
@@ -71,15 +71,65 @@ namespace CasScaleSender.Cli
             int model = GetInt(o, "model", cfg.Model);
             int dataType = GetInt(o, "datatype", cfg.PluDataType);
             int timeout = GetInt(o, "timeout", 10);
-            Encoding enc; try { enc = Encoding.GetEncoding(Get(o, "encoding", cfg.EncodingName)); } catch { enc = Encoding.ASCII; }
+            string encName = Get(o, "encoding", cfg.EncodingName);
+            Encoding enc;
+            try { enc = Encoding.GetEncoding(encName); }
+            catch { enc = Encoding.ASCII; Console.Error.WriteLine("UYARI: '" + encName + "' kod sayfasi bulunamadi, ASCII kullanilacak (Turkce karakterler bozulabilir)."); }
 
             var recs = new List<string>(); var names = new List<string>();
-            foreach (var row in rows)
+            var overflowErrors = new List<string>();
+            for (int i = 0; i < rows.Count; i++)
             {
-                recs.Add(PluBuilder.BuildV06(row, enc));
-                string n; row.TryGetValue("Name", out n); names.Add(n ?? "");
+                var row = rows[i];
+                string n; row.TryGetValue("Name", out n);
+                try
+                {
+                    recs.Add(PluBuilder.BuildV06(row, enc));
+                    names.Add(n ?? "");
+                }
+                catch (PluFieldOverflowException ex)
+                {
+                    string pluNo; row.TryGetValue("PLU No", out pluNo);
+                    overflowErrors.Add(string.Format("Kayit {0} (PLU No={1}, Ad={2}): {3}",
+                        i + 1,
+                        string.IsNullOrEmpty(pluNo) ? "?" : pluNo,
+                        string.IsNullOrEmpty(n) ? "?" : n,
+                        ex.Message));
+                }
+            }
+            if (overflowErrors.Count > 0)
+            {
+                Console.Error.WriteLine(overflowErrors.Count + " kayitta alan tasmasi bulundu, hicbir PLU gonderilmedi:");
+                foreach (var e in overflowErrors) Console.Error.WriteLine("  " + e);
+                return 2;
             }
             Console.WriteLine("Gonderiliyor: " + recs.Count + " PLU -> " + ip + ":" + port);
+
+            // --clear (tam degistir): gonderimden ONCE, menude OLMAYAN mevcut
+            // PLU'lari teraziden sil (eski/bos kalinti temizligi). Direct-TCP
+            // (CasNetReader) — OCX degil. Menudeki PLU'lar zaten send'de uzerine
+            // yazilacagi icin silinmez (bosuna sil+yaz churn'i yok).
+            bool clear = o.ContainsKey("clear");
+            int dept = GetInt(o, "dept", 1);
+            if (clear)
+            {
+                var menuPlus = new HashSet<int>();
+                foreach (var row in rows)
+                {
+                    string p;
+                    if (row.TryGetValue("PLU No", out p)) { int v = DigitsToInt(p); if (v > 0) menuPlus.Add(v); }
+                }
+                Console.WriteLine("Tam degistir: terazi taraniyor (eski PLU temizligi)...");
+                var existing = CasNetReader.Read(ip, port, 1, 9999, dept, timeout * 1000, Console.WriteLine);
+                var stale = new List<int>();
+                foreach (var pn in ExtractPluNumbers(existing)) if (!menuPlus.Contains(pn)) stale.Add(pn);
+                if (stale.Count > 0)
+                {
+                    Console.WriteLine(stale.Count + " eski/fazla PLU siliniyor...");
+                    CasNetReader.DeletePlus(ip, port, dept, stale, timeout * 1000, Console.WriteLine);
+                }
+                else Console.WriteLine("Temizlenecek eski PLU yok.");
+            }
 
             using (var host = new ScaleHost(Console.WriteLine))
             {
@@ -89,6 +139,49 @@ namespace CasScaleSender.Cli
                 Console.WriteLine(string.Format("TAMAMLANDI. Basarili: {0}, Basarisiz: {1}", r[0], r[1]));
                 return r[1] == 0 ? 0 : 4;
             }
+        }
+
+        // ---------- DELETEALL ----------
+        // Terazideki TUM PLU'lari siler: once okur (mevcut PLU no'lari bulur),
+        // sonra tek tek direct-TCP siler. OCX DeleteAllPLU wire'a hicbir sey
+        // gondermedigi icin CL-Works'un ham komutu (CasNetReader.DeletePlus)
+        // kullanilir — CL-Works "tumunu sec+sil"de zaten tek tek gonderiyor.
+        private static int DoDeleteAll(Dictionary<string, string> o, AppSettings cfg)
+        {
+            string ip = Get(o, "ip", cfg.Ip);
+            int port = GetInt(o, "port", cfg.Port);
+            int dept = GetInt(o, "dept", 1);
+            int from = GetInt(o, "from", 1);
+            int to = GetInt(o, "to", 9999);
+            int timeout = GetInt(o, "timeout", 10);
+
+            Console.WriteLine(string.Format("TUM PLU'LAR SILINIYOR -> {0}:{1} (departman {2})", ip, port, dept));
+            Console.WriteLine(string.Format("Terazi taraniyor (PLU {0}-{1})...", from, to));
+            var existing = CasNetReader.Read(ip, port, from, to, dept, timeout * 1000, Console.WriteLine);
+            var plus = ExtractPluNumbers(existing);
+            if (plus.Count == 0) { Console.WriteLine("Silinecek PLU yok (terazi zaten bos)."); return 0; }
+
+            Console.WriteLine(plus.Count + " PLU siliniyor...");
+            var r = CasNetReader.DeletePlus(ip, port, dept, plus, timeout * 1000, Console.WriteLine);
+            Console.WriteLine(string.Format("TAMAMLANDI. Silinen: {0}, Basarisiz: {1}", r[0], r[1]));
+            return r[1] == 0 ? 0 : 4;
+        }
+
+        // Read() ciktisindan (satir sozlukleri) benzersiz, 0'dan buyuk PLU no'lari.
+        private static List<int> ExtractPluNumbers(List<Dictionary<string, string>> rows)
+        {
+            var seen = new HashSet<int>();
+            var list = new List<int>();
+            foreach (var row in rows)
+            {
+                string p;
+                if (row.TryGetValue("PLU No", out p))
+                {
+                    int v = DigitsToInt(p);
+                    if (v > 0 && seen.Add(v)) list.Add(v);
+                }
+            }
+            return list;
         }
 
         // ---------- RECEIVE ----------
@@ -221,6 +314,7 @@ KOMUTLAR:
   send      Excel'deki PLU'lari teraziye gonderir   (GONDER)
   receive   Teraziden PLU okuyup .xlsx kaydeder      (AL)
   print     Excel'deki PLU listesini yaziciya basar
+  deleteall Terazideki TUM PLU'lari siler           (DIKKAT: geri alinamaz)
   help      Bu yardimi gosterir
   version   Surumu gosterir
 
@@ -236,6 +330,12 @@ ORTAK SECENEKLER (terazi):
 send:
   --excel <dosya>    Gonderilecek .xlsx           (--excel VEYA --json)
   --json <dosya>     Gonderilecek .json           (obje dizisi; POS entegrasyonu)
+  --clear            Gonderimden ONCE tum PLU'lari sil (tam degistir; kalinti kalmaz)
+  --dept <n>         Departman No (--clear icin)   (varsayilan 1)
+
+deleteall:
+  --dept <n>         Departman No                 (varsayilan 1)
+  (DIKKAT: terazideki tum PLU'lari kalici siler; onay UI'da alinmali.)
 
 receive:
   --out <dosya>      Kaydedilecek .xlsx           (--out VEYA --json, ikisi de olur)

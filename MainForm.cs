@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Printing;
 using System.Text;
 using System.Windows.Forms;
 
@@ -9,10 +8,6 @@ namespace CasScaleSender
 {
     public class MainForm : Form
     {
-        private const int ACTION_DOWNLOAD = 3;   // teraziye yaz
-        private const int RECV_SUCCESS = 1001;
-        private const int RECV_FAIL = 1002;
-
         private AxCASSCALELib.AxCasScale ax;
         private AppSettings cfg;
 
@@ -28,17 +23,17 @@ namespace CasScaleSender
         private System.Threading.Thread readThread;
         private List<Dictionary<string, string>> received = new List<Dictionary<string, string>>();
 
-        // Coklu gonderim durumu
+        // Coklu gonderim durumu (asil gonderim mantigi: bkz. ScaleSendSession)
         private List<string> records = new List<string>();
         private List<string> names = new List<string>();
-        private int index;
-        private int okCount, failCount;            // aktif terazi
+        // Tam degistir: Excel'deki (menudeki) PLU no'lar. Gonderimden ONCE teraziden
+        // bunlarin DISINDAKI eski PLU'lar silinir (eski/cop kalinti — "0101..." vb.).
+        private HashSet<int> menuPlus = new HashSet<int>();
         private int totalOk, totalFail;            // tum teraziler
-        private string sendIp; private int sendPort, sendModel, sendDataType;
         private List<ScaleConfig> sendQueue = new List<ScaleConfig>();
         private int sendScaleIdx;
         private bool sending;
-        private System.Windows.Forms.Timer sendTimer;
+        private ScaleSendSession activeSend;
         private const int SEND_TIMEOUT_MS = 10000; // terazi yaniti icin bekleme suresi (10 sn)
 
         public MainForm()
@@ -117,10 +112,7 @@ namespace CasScaleSender
             log = new ListBox { Left = x1, Top = y, Width = ClientSize.Width - 24, Height = ClientSize.Height - y - 12, Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
             Add(log);
 
-            sendTimer = new System.Windows.Forms.Timer { Interval = SEND_TIMEOUT_MS };
-            sendTimer.Tick += (s, e) => OnSendTimeout();
-
-            FormClosing += (s, e) => { StopSendTimer(); SaveCfgFromUi(); TryDisconnect(sendIp); };
+            FormClosing += (s, e) => { if (activeSend != null) activeSend.Cancel(); SaveCfgFromUi(); };
         }
 
         private Button ScaleBtn(string t, int x, int y, int w)
@@ -342,23 +334,61 @@ namespace CasScaleSender
             if (string.IsNullOrWhiteSpace(txtExcel.Text) || !System.IO.File.Exists(txtExcel.Text))
             { Info("Once gecerli bir Excel dosyasi secin."); return; }
 
-            Encoding enc;
-            try { enc = Encoding.GetEncoding(cfg.EncodingName); } catch { enc = Encoding.ASCII; }
+            Encoding enc; bool encFallback = false;
+            try { enc = Encoding.GetEncoding(cfg.EncodingName); }
+            catch { enc = Encoding.ASCII; encFallback = true; }
 
             ExcelReader.Sheet sheet;
             try { sheet = ExcelReader.Read(txtExcel.Text); }
             catch (Exception ex) { Info("Excel okunamadi: " + ex.Message); return; }
-            if (sheet.Rows.Count == 0) { Info("Excel'de veri satiri yok."); return; }
+            if (sheet.Rows.Count == 0)
+            { Info("Excel'de veri satiri yok (not: yalnizca calisma kitabinin ILK sayfasi okunur; veri baska sayfadaysa o sayfayi ilk siraya alin)."); return; }
 
             records.Clear(); names.Clear();
+            var overflowErrors = new List<string>();
+            for (int i = 0; i < sheet.Rows.Count; i++)
+            {
+                var row = sheet.Rows[i];
+                string n; row.TryGetValue("Name", out n);
+                try
+                {
+                    records.Add(PluBuilder.BuildV06(row, enc));
+                    names.Add(n ?? "");
+                }
+                catch (PluFieldOverflowException ex)
+                {
+                    string pluNo; row.TryGetValue("PLU No", out pluNo);
+                    overflowErrors.Add(string.Format("Kayit {0} (PLU No={1}, Ad={2}): {3}",
+                        i + 1,
+                        string.IsNullOrEmpty(pluNo) ? "?" : pluNo,
+                        string.IsNullOrEmpty(n) ? "?" : n,
+                        ex.Message));
+                }
+            }
+
+            // Tam degistir icin menu PLU no kumesi (silinecekleri bunun disindan bul).
+            menuPlus.Clear();
             foreach (var row in sheet.Rows)
             {
-                records.Add(PluBuilder.BuildV06(row, enc));
-                string n; row.TryGetValue("Name", out n);
-                names.Add(n ?? "");
+                string p;
+                if (row.TryGetValue("PLU No", out p)) { int v = DigitsToInt(p); if (v > 0) menuPlus.Add(v); }
+            }
+
+            if (overflowErrors.Count > 0)
+            {
+                log.Items.Clear();
+                if (encFallback) Info("UYARI: '" + cfg.EncodingName + "' kod sayfasi yuklenemedi, ASCII kullanildi (Turkce karakterler bozulabilir).");
+                Info("GONDERIM DURDURULDU: " + overflowErrors.Count + " kayitta alan tasmasi bulundu. Once Excel'i duzeltin.");
+                foreach (var e in overflowErrors) Info("  " + e);
+                int shown = Math.Min(10, overflowErrors.Count);
+                Warn("Excel'de " + overflowErrors.Count + " kayitta alan tasmasi var, hicbir PLU gonderilmedi:\r\n\r\n" +
+                     string.Join("\r\n", overflowErrors.GetRange(0, shown)) +
+                     (overflowErrors.Count > shown ? "\r\n... (tumu icin durum listesine bakin)" : ""));
+                return;
             }
 
             log.Items.Clear();
+            if (encFallback) Info("UYARI: '" + cfg.EncodingName + "' kod sayfasi yuklenemedi, ASCII kullanildi (Turkce karakterler bozulabilir).");
             Info("Excel okundu. Satir: " + sheet.Rows.Count + "  |  Hedef terazi: " + scales.Count);
 
             sendQueue = scales;
@@ -369,53 +399,66 @@ namespace CasScaleSender
             SendToScale(0);
         }
 
-        // Sirasidaki teraziye baglanip tum PLU'lari gonderir.
+        // Sirasidaki teraziye baglanip tum PLU'lari gonderir. Asil gonderim
+        // dongusu (baglan/gonder/bekle/zaman asimi) ScaleSendSession'da yasar
+        // (GUI ve CLI/ScaleHost ortak kullanir); burada yalnizca kuyruk
+        // yonetimi ve UI loglari var.
         private void SendToScale(int idx)
         {
             var sc = sendQueue[idx];
-            sendIp = sc.Ip; sendPort = sc.Port; sendModel = sc.Model; sendDataType = sc.DataType;
-            index = 0; okCount = 0; failCount = 0;
+            Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) — tam degistir ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
 
-            Info(string.Format("=== [{0}/{1}] {2} ({3}:{4}) ===", idx + 1, sendQueue.Count, sc.Name, sc.Ip, sc.Port));
-            int rtnC = ax.ConnectionEx3(sendIp, sendPort, -1, sendModel, cfg.Version, 97);
-            Info("  Baglaniliyor... ret=" + rtnC);
-            if (rtnC <= 0)
+            // Tam degistir: menude (Excel'de) OLMAYAN eski PLU'lari sil, sonra menuyu
+            // yaz. Boylece eski/cop kalinti (isim onunde "0101..." vb.) temizlenir.
+            // Once ARKA PLANDA temizle (CasNetReader.Read/DeletePlus bloklar; UI donmasin
+            // — AL ile ayni desen), bitince UI thread'inde asenkron OCX gonderimini baslat.
+            Action<string> logCb = s => { try { BeginInvoke((Action)(() => Info(s))); } catch { } };
+            var t = new System.Threading.Thread(() =>
             {
-                Info("  Baglanti kurulamadi, bu terazi atlandi.");
-                totalFail += records.Count;
-                AdvanceScale();
-                return;
-            }
-            SendNext();
-        }
-
-        // Siradaki PLU'yu gonderir; terazi cevabini Ax_RecvEventString bekler.
-        private void SendNext()
-        {
-            while (index < records.Count)
-            {
-                int i = index;
-                int rtn = ax.SendDataString(sendIp, -1, sendModel, cfg.Version, ACTION_DOWNLOAD, sendDataType, records[i]);
-                if (rtn > 0)
+                try
                 {
-                    RestartSendTimer();
-                    Info(string.Format("  #{0} '{1}' gonderildi, yanit bekleniyor...", i + 1, names[i]));
-                    return;
+                    logCb("  Eski PLU'lar taraniyor (tam degistir)...");
+                    var existing = CasNetReader.Read(sc.Ip, sc.Port, 1, 9999, 1, 8000, logCb, () => !sending);
+                    var stale = new List<int>();
+                    foreach (var row in existing)
+                    {
+                        string p;
+                        if (row.TryGetValue("PLU No", out p))
+                        {
+                            int v = DigitsToInt(p);
+                            if (v > 0 && !menuPlus.Contains(v)) stale.Add(v);
+                        }
+                    }
+                    if (stale.Count > 0)
+                    {
+                        logCb("  " + stale.Count + " eski/fazla PLU siliniyor...");
+                        CasNetReader.DeletePlus(sc.Ip, sc.Port, 1, stale, 8000, logCb, () => !sending);
+                    }
+                    else logCb("  Temizlenecek eski PLU yok.");
                 }
-                failCount++;
-                Info(string.Format("  #{0} '{1}' KUYRUGA ALINAMADI (ret={2})", i + 1, names[i], rtn));
-                index++;
-            }
-            ScaleDone();
+                catch (Exception ex) { logCb("  Temizleme atlandi: " + ex.Message); }
+                try { BeginInvoke((Action)(() => StartSendSession(idx))); } catch { }
+            });
+            t.IsBackground = true;
+            t.Start();
         }
 
-        // Aktif terazi bitti -> toplamlara ekle, baglantiyi kapat, sonrakine gec.
-        private void ScaleDone()
+        // Temizlik bittikten sonra UI thread'inde asenkron OCX gonderimini baslatir.
+        private void StartSendSession(int idx)
         {
-            StopSendTimer();
-            Info(string.Format("  Bitti. Basarili: {0}, Basarisiz: {1}", okCount, failCount));
-            totalOk += okCount; totalFail += failCount;
-            TryDisconnect(sendIp);
+            if (!sending) { SetBusy(false); return; } // iptal edilmis
+            var sc = sendQueue[idx];
+            activeSend = new ScaleSendSession(ax, Info);
+            activeSend.Completed += OnScaleSendCompleted;
+            activeSend.Start(sc.Ip, sc.Port, sc.Model, sc.Version, sc.DataType, records, names, SEND_TIMEOUT_MS);
+        }
+
+        // Aktif terazi bitti (kayitlar tukendi VEYA zaman asimiyla durduruldu)
+        // -> toplamlara ekle, sonrakine gec.
+        private void OnScaleSendCompleted()
+        {
+            totalOk += activeSend.OkCount; totalFail += activeSend.FailCount;
+            Info(string.Format("  Bitti. Basarili: {0}, Basarisiz: {1}", activeSend.OkCount, activeSend.FailCount));
             AdvanceScale();
         }
 
@@ -440,17 +483,8 @@ namespace CasScaleSender
         private void Ax_RecvEventString(object sender, AxCASSCALELib._DCasScaleEvents_RecvEventStringEvent e)
         {
             // Okuma artik OCX olay'i degil, dogrudan TCP (CasNetReader) ile yapilir.
-            if (!sending || e.iTransType != ACTION_DOWNLOAD) return;
-
-            if (e.iResult == RECV_SUCCESS) { StopSendTimer(); okCount++; Info(string.Format("  -> #{0} '{1}' OK", index + 1, PluName(index))); }
-            else if (e.iResult == RECV_FAIL) { StopSendTimer(); failCount++; Info(string.Format("  -> #{0} '{1}' BASARISIZ", index + 1, PluName(index))); }
-            else return;
-
-            index++;
-            SendNext();
+            if (activeSend != null) activeSend.HandleRecv(e.iTransType, e.iResult);
         }
-
-        private string PluName(int i) { return (i >= 0 && i < names.Count) ? names[i] : ""; }
 
         private void SetBusy(bool busy)
         {
@@ -474,30 +508,10 @@ namespace CasScaleSender
                 Info("Iptal ediliyor...");
                 return;
             }
-            StopSendTimer();
             sending = false;
-            TryDisconnect(sendIp);
+            if (activeSend != null) activeSend.Cancel();
             SetBusy(false);
             Info("Gonderim iptal edildi.");
-        }
-
-        // ---- zaman asimi ----
-
-        private void RestartSendTimer() { sendTimer.Stop(); sendTimer.Start(); }
-        private void StopSendTimer() { if (sendTimer != null) sendTimer.Stop(); }
-
-        // 10 sn icinde terazi yaniti gelmezse: bu terazide durdur, sonrakine gec.
-        private void OnSendTimeout()
-        {
-            StopSendTimer();
-            if (!sending) return;
-            failCount++;
-            Info(string.Format("  -> #{0} '{1}' ZAMAN ASIMI ({2} sn yanit yok)",
-                index + 1, PluName(index), SEND_TIMEOUT_MS / 1000));
-            Info("  Bu terazide gonderim durduruldu, sonraki teraziye geciliyor.");
-            totalOk += okCount; totalFail += failCount;
-            TryDisconnect(sendIp);
-            AdvanceScale();
         }
 
         // ---- teraziden okuma (AL) — TEK terazi ----
@@ -517,17 +531,17 @@ namespace CasScaleSender
             }
             var sc = checkedScales[0];
 
-            int start, end;
-            if (!ShowRangeDialog(out start, out end)) return;
+            int start, end, dept;
+            if (!ShowRangeDialog(out start, out end, out dept)) return;
             if (start < 1) start = 1;
             if (end < start) { Info("Bitis PLU, baslangictan kucuk olamaz."); return; }
 
             string ip = sc.Ip; int port = sc.Port;
             received.Clear();
-            readDept = 1;
+            readDept = dept;
 
             log.Items.Clear();
-            Info(string.Format("Teraziden okunuyor: {0} ({1}:{2}) — PLU {3}-{4}", sc.Name, ip, port, start, end));
+            Info(string.Format("Teraziden okunuyor: {0} ({1}:{2}) — PLU {3}-{4}, departman {5}", sc.Name, ip, port, start, end, readDept));
 
             receiving = true;
             SetBusy(true);
@@ -569,41 +583,41 @@ namespace CasScaleSender
             }
         }
 
-        // Okunacak PLU araligini soran kucuk pencere.
-        private bool ShowRangeDialog(out int start, out int end)
+        // Okunacak PLU araligini ve departmani soran kucuk pencere.
+        // Departman: CLI'nin --dept secenegiyle ayni anlamda (varsayilan 1);
+        // terazide PLU'lar departman 1 disinda tutuluyorsa burada degistirilir.
+        // Protokolde 2 HEX haneyle tasindigi icin (CasNetReader.Read) 1-255 ile sinirlanir.
+        private bool ShowRangeDialog(out int start, out int end, out int dept)
         {
-            start = 1; end = 100;
+            start = 1; end = 100; dept = 1;
             using (var f = new Form())
             {
                 f.Text = "Teraziden PLU Al";
                 f.FormBorderStyle = FormBorderStyle.FixedDialog;
                 f.StartPosition = FormStartPosition.CenterParent;
                 f.MinimizeBox = false; f.MaximizeBox = false;
-                f.ClientSize = new Size(280, 135);
+                f.ClientSize = new Size(280, 168);
 
                 var l1 = new Label { Text = "Baslangic PLU:", Left = 12, Top = 18, Width = 110 };
                 var t1 = new TextBox { Left = 128, Top = 15, Width = 120, Text = "1" };
                 var l2 = new Label { Text = "Bitis PLU:", Left = 12, Top = 52, Width = 110 };
                 var t2 = new TextBox { Left = 128, Top = 49, Width = 120, Text = "100" };
-                var ok = new Button { Text = "Al", Left = 128, Top = 92, Width = 58, DialogResult = DialogResult.OK };
-                var cancel = new Button { Text = "Iptal", Left = 190, Top = 92, Width = 58, DialogResult = DialogResult.Cancel };
-                f.Controls.AddRange(new Control[] { l1, t1, l2, t2, ok, cancel });
+                var l3 = new Label { Text = "Departman No:", Left = 12, Top = 86, Width = 110 };
+                var n3 = new NumericUpDown { Left = 128, Top = 83, Width = 120, Minimum = 1, Maximum = 255, Value = 1 };
+                var ok = new Button { Text = "Al", Left = 128, Top = 125, Width = 58, DialogResult = DialogResult.OK };
+                var cancel = new Button { Text = "Iptal", Left = 190, Top = 125, Width = 58, DialogResult = DialogResult.Cancel };
+                f.Controls.AddRange(new Control[] { l1, t1, l2, t2, l3, n3, ok, cancel });
                 f.AcceptButton = ok; f.CancelButton = cancel;
 
                 if (f.ShowDialog(this) != DialogResult.OK) return false;
                 int.TryParse(t1.Text.Trim(), out start);
                 int.TryParse(t2.Text.Trim(), out end);
+                dept = (int)n3.Value;
                 return true;
             }
         }
 
         // ---- yardimcilar ----
-
-        private void TryDisconnect(string ip)
-        {
-            if (string.IsNullOrWhiteSpace(ip)) return;
-            try { if (ax != null) ax.DisconnectOneEx(ip, -1); } catch { }
-        }
 
         private void SaveCfgFromUi()
         {
