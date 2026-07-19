@@ -56,7 +56,7 @@ msbuild CasScaleSender.sln /p:Configuration=Release /p:Platform=x86
 - Hardware: CAS CL3000/CL5000 scales over TCP, default port 20304.
 
 **Cross-repo impact — if you change this here, check there:**
-- The CLI public contract (flags of `novempos-cli send/receive/print --json`, the JSON row schema, exit codes 0–4) is consumed by kasapos-terminal-v2 (external, not on this machine — the "Flutter POS" referred to above) — any change needs coordination there; novempos-backend is unaffected.
+- The CLI public contract (flags of `novempos-cli send/receive/print --json`, the JSON row schema, exit codes 0–4) is consumed by kasapos-terminal-v2 (`../kasapos-terminal-v2` in this workspace — the "Flutter POS" referred to above; consumer code: `lib/core/services/cas_scale/cas_scale_service.dart`) — any change needs coordination there; novempos-backend is unaffected.
 
 ## Working style
 
